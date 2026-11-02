@@ -45,6 +45,7 @@ flowchart TD
 | `src/executor.mjs` | 每会话 worker、Seatbelt 权限、请求配对、取消、只读父产物授权 |
 | `src/worker.mjs` | 执行 JS、调度子进程、补丁、图片、异步轮询及完整执行日志 |
 | `src/streams.mjs` | UTF-8/SSE 分块解码、跨块凭据脱敏 |
+| `src/tool-media.mjs` | 按会话/调用ID绑定原图和有序内容；校验代码/结果哈希后恢复多模态工具返回 |
 | `src/cli-input.mjs` | 输入文件复制、大小限制、防覆盖与软链接/路径校验 |
 | `tools/cad.py` | notebook/library 构建、包导出、STEP 检查和渲染辅助入口 |
 | `public/` | 原生 HTML/CSS/JS 网页，会话、思考/调用气泡、问答、代码和渲染预览 |
@@ -57,7 +58,7 @@ flowchart TD
 {"type":"function","function":{"name":"exec","arguments":{"code":"const r = await tools.exec_command({cmd:\"pwd\"}); text(r);"}}}
 ```
 
-OpenCode 将 `code` 送入插件；插件选择本会话 worker，worker 在新的 JS 上下文执行。`text()` 明确收集文本，`image()` 收集真实图片附件，再将结果送回模型。JS 语法/协议错误作为工具错误返回，命令退出非零则保留为真实观察，模型可以修改后重试；执行器不会代改模型源码或推测修复。
+OpenCode 将 `code` 送入插件；插件选择本会话 worker，worker 在新的 JS 上下文执行。`text()`、`image()` 按实际执行顺序收集文本和原图。纯文本按原工具通道返回；图片调用原子保存至网关侧sidecar，默认经Responses的 `function_call_output.output` 数组返回。JS 语法/协议错误作为工具错误返回；错误前已输出的图片保留为错误证据。命令退出非零保留为真实观察，模型可以修改后重试；执行器不会代改模型源码或推测修复。
 
 `exec_command` 默认等待10秒；未结束返回进程 `session_id`，后续 `write_stdin` 轮询。JS 变量不跨 exec 保留，进程 ID 在同一个存活 worker 内有效。应使用 `text(r)` 保留输出、退出码和会话 ID；仅打印 `r.output` 可能丢失仍在运行的进程 ID。
 
@@ -89,12 +90,13 @@ OpenCode 数据库是会话的权威记录；`.runtime/events.jsonl` 归档事�
 
 ## 验证与 review
 
-自动测试共 **34项，全部通过**：
+初始版本自动测试34项通过；图片对齐更新后共 **62项，全部通过**：
 
 - 执行器：JS依赖顺序、Unicode跨块、错误恢复、ALL_TOOLS、跨exec轮询、EOF/heredoc、补丁、图片附件。
 - 生命周期/隔离：取消后台任务（含忽略TERM）、未await错误与立即恢复、定时器清理、跨工作区读写/软链接拒绝、凭据拒读、网络拒绝、子review只读。
 - 流式处理：各字节边界UTF-8/SSE、CRLF、多行data、分块凭据脱敏和二进制保真。
 - CLI输入与启动：中文文件名、原始bytes、不覆盖源文件、路径/软链接/大小校验、新建/指定/继续会话、错误退出码、所有权清理、网页保活与服务重用。
+- 图片对齐：原图字节与text/image顺序、会话/调用/代码/输出绑定、并行结果、多张同图、失败证据、持久化与幂等、缺失sidecar拒绝、真实用户图片保持不变。
 
 独立开发review发现并修复了 worker 启动权限、异步越轮写入、停止残留、UTF-8损坏、错误被误标成功、产物脚本执行、导入失败清理、CLI模型配置分歧等问题。review子智能体还实际验证了外部进程信号拒绝、只读授权与强停。
 
@@ -118,6 +120,22 @@ OpenCode 数据库是会话的权威记录；`.runtime/events.jsonl` 归档事�
 当前只验收macOS。PTY与向非交互命令发送非空stdin尚未实现，运行时会明确报错；只有EOF、轮询和取消通道。`ALL_TOOLS` 只包含已经实现的四个子工具。输出预算按字符近似裁剪，完整命令输出另行保存。这些都与完整Codex runtime存在差异，不能宣称逐项等价。
 
 本次真实验证是简单圆柱，不代表复杂装配、圆角倒角、曲面逆向或长期Agent成功率已经解决。没有做新机器完整安装复现、256k收费长请求压测或训练数据mask验收；这些需要独立测试结果。
+
+## 图片与原始轨迹对齐（2026-11-02 更新）
+
+初始OpenCode附件通道会把图变成后续user消息，并将本例3240×2160缩为2000×1333。新路径保留原始 `tools.view_image → image()` 编排，新增调用不再经过这个附件通道；CLI和网页仍共用同一份完整记录，网页通过只读API显示原图。
+
+worker保存有序 `input_text/input_image`，插件取得真实OpenCode `sessionID/callID`，将原始内容原子写入 `.runtime/tool-media/`。OpenCode内部只携带可核验收据，网关通过 `chat.headers` 的本机会话ID和原始工具调用，检查工具名、代码哈希、工具结果哈希，恢复对应 `function_call_output.output=[input_text,input_image,...]`。收据不会发给模型，不新增user图片消息，不猜测、拆解或修改用户图片。原图字节和尺寸、SHA‑256、detail映射进入审计。缺失记录、错误关联或上游拒绝均明确报错，禁止静默丢图/缩图/改变角色。
+
+每个模型请求目录保存 `request.json`（OpenCode原始请求）、`forwarded-request.json`（真正发送的请求）、`media-alignment.json`（绑定与图片哈希/尺寸审计）及原始流式返回。记录在模型进程外，执行worker不能修改。新请求仅恢复仍存在的调用/结果；不会把上下文压缩移除的历史图片复活，旧会话也不回溯改写。
+
+会话导出升级为 `cad-code-session-v2`，附带 `tool_media` 中的完整有序内容与原图，单独下载也保留工具图片证据。单个exec最多16张图、原始图片总计48MiB；完整转发请求默认最多64MiB，可用 `CAD_CODE_MAX_MODEL_REQUEST_BYTES` 调整。超限明确拒绝，不通过丢历史或缩图适配预算。
+
+实测此GPT‑6.1供应商的Chat Completions对 `role=tool` 图片请求返回HTTP200，但模型报告没有图片；原生Responses工具图片则成功识别随机字符串。因此默认provider改为 `@ai-sdk/openai` 的Responses通道，仍由OpenCode管理Agent，不自己实现推理循环。供应商变更需重新验证，不能以HTTP200代替读图验收。
+
+真实端到端验收：以3240×2160原图输出 `text("BEFORE_IMAGE") → image(...) → text("AFTER_IMAGE")`，转发原图bytes与本地SHA完全相同，原生工具内容顺序一致，合成user图片数为0；GPT‑6.1准确读出图内随机 `CAD-352A63`。重启后再次用旧写法 `image(r.image_url)` 验证，历史与新调用两份原图均恢复且再次准确读图。网页也已验证工具内按原顺序显示文字/图片/文字，图片naturalWidth/naturalHeight保持3240×2160。原始 `detail=original` 显式映射到API支持的 `high`，不宣称可以约束供应商内部视觉处理。这里只对齐客户端可观察的调用、内容顺序和图片数据。
+
+官方接口依据：[Function calling](https://developers.openai.com/api/docs/guides/function-calling) 支持工具结果返回图片/文件数组；第三方供应商兼容性仍以上述实测为准。
 
 ## 体验入口
 

@@ -74,12 +74,17 @@ async function newSession(){
   try{return await state.creating;}catch(e){showError(e);throw e;}finally{state.creating=null;}
 }
 function toolPart(part,index){
-  const s=part.state||{},id=part.id||'tool-'+index,status=s.status||'pending';
+  const s=part.state||{},id=part.id||'tool-'+index,status=s.metadata?.cadExecutionError?'error':s.status||'pending';
   const toolName=part.tool||'工具',box=el('div','tool-sections');
   const input=typeof s.input==='object'&&s.input!==null&&typeof s.input.code==='string'?s.input.code:readable(s.input||{});
   box.append(fold(id+'-input','调用参数',input.length.toLocaleString()+' 字符',el('pre',null,input)));
-  if(s.output!==undefined||s.error){const output=s.error||s.output;box.append(fold(id+'-output',s.error?'错误结果':'调用结果',typeof output==='string'?output.length.toLocaleString()+' 字符':'',el('pre',null,readable(output)),{open:status==='error'}));}
+  const media=s.metadata?.cadMedia;
+  if(s.output!==undefined||s.error){const output=s.error||(media?media.visibleOutput:s.output),body=el('div');
+    if(media?.parts){for(const p of media.parts){if(p.type==='input_text')body.append(el('pre',null,p.text));else if(p.type==='input_image'){const image=el('img','tool-result-image');image.src='/api/sessions/'+encodeURIComponent(part.sessionID||state.id)+'/tool-image?call='+encodeURIComponent(media.callID)+'&index='+p.index;image.alt=media.images?.[p.index]?.filename||'工具返回原图';body.append(image);}}}
+    else body.append(el('pre',null,readable(output)));
+    box.append(fold(id+'-output',s.error||s.metadata?.cadExecutionError?'错误结果':'调用结果',typeof output==='string'?output.length.toLocaleString()+' 字符':'',body,{open:status==='error'}));}
   for(const a of [...(s.attachments||[]),...(part.attachments||[])])if(a.mime?.startsWith('image/')&&/^(data:image\/|\/api\/)/.test(a.url||'')){const image=el('img','tool-result-image');image.src=a.url;image.alt=a.filename||'工具返回图像';box.append(image);}
+  if(!media?.parts)for(const a of media?.images||[]){const image=el('img','tool-result-image');image.src='/api/sessions/'+encodeURIComponent(part.sessionID||state.id)+'/tool-image?call='+encodeURIComponent(media.callID)+'&index='+a.index;image.alt=a.filename||'工具返回原图';box.append(image);}
   const outer=fold(id+'-outer',toolName,({completed:'已完成',error:'执行错误',running:'正在执行',pending:'等待执行'})[status]||status,box,{open:status==='running'||status==='error',className:'tool-fold'});
   const summary=outer.querySelector('summary');summary.insertBefore(el('span','tool-state '+status),summary.firstChild);return outer;
 }

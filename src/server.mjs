@@ -5,8 +5,13 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {ROOT,RUNTIME,WORKSPACE,PYTHON,SKILL,sessionDir,inside} from './paths.mjs';
 import {sseDecoder,secretRedactor} from './streams.mjs';
+import {restoreToolMedia,restoreResponsesToolMedia,loadToolMedia} from './tool-media.mjs';
 const port=Number(process.env.PORT||8772),ocPort=Number(process.env.CAD_CODE_OPENCODE_PORT||18134),gatewayPort=Number(process.env.CAD_CODE_GATEWAY_PORT||18135);
 const model=process.env.CAD_CODE_MODEL||'gpt-6.1-sol';
+const wireAPI=process.env.CAD_CODE_WIRE_API||'responses';
+if(!['responses','chat'].includes(wireAPI))throw Error('CAD_CODE_WIRE_API must be responses or chat');
+const maxForwardedBytes=Number(process.env.CAD_CODE_MAX_MODEL_REQUEST_BYTES||64*1024*1024);
+if(!Number.isSafeInteger(maxForwardedBytes)||maxForwardedBytes<1024)throw Error('Invalid CAD_CODE_MAX_MODEL_REQUEST_BYTES');
 const args=process.argv.slice(2),credentialArg=args.indexOf('--credentials');
 const webEnabled=args.includes('--web');
 fs.mkdirSync(RUNTIME,{recursive:true});fs.mkdirSync(WORKSPACE,{recursive:true});
@@ -38,16 +43,27 @@ const gateway=http.createServer(async(req,res)=>{
   try{
     if(req.headers.authorization!=='Bearer '+gatewayToken)return json(res,{error:'Unauthorized'},401);
     const route=new URL(req.url,'http://localhost').pathname.replace(/^\/v1/,'');
-    if(!['/chat/completions','/models'].includes(route))return json(res,{error:'Unknown model route'},404);
-    let payload;if(req.method==='POST'){
-      payload=JSON.parse(await body(req));payload.temperature=1;payload.model=model;
-      payload.reasoning_effort='high';payload.store=false;
-    }
+    if(!['/chat/completions','/responses','/models'].includes(route))return json(res,{error:'Unknown model route'},404);
     const requestID=Date.now()+'-'+crypto.randomBytes(4).toString('hex');
     const logDir=path.join(RUNTIME,'model-requests',requestID);fs.mkdirSync(logDir,{recursive:true});
-    fs.writeFileSync(path.join(logDir,'request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,body:payload},null,2)));
+    let payload,rawPayload,mediaAudit=[];if(req.method==='POST'){
+      payload=JSON.parse(await body(req));rawPayload=structuredClone(payload);payload.temperature=1;payload.model=model;
+      fs.writeFileSync(path.join(logDir,'request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,sessionID:req.headers['x-cad-session-id']||null,body:rawPayload},null,2)));
+      payload.store=false;
+      try{
+        if(route==='/responses'){
+          payload.reasoning={...payload.reasoning,effort:'high'};
+          const restored=restoreResponsesToolMedia(payload.input,{sessionID:req.headers['x-cad-session-id']});payload.input=restored.input;mediaAudit=restored.audit;
+        }else{payload.reasoning_effort='high';const restored=restoreToolMedia(payload.messages,{sessionID:req.headers['x-cad-session-id']});payload.messages=restored.messages;mediaAudit=restored.audit;}
+      }catch(e){fs.writeFileSync(path.join(logDir,'media-alignment-error.json'),JSON.stringify({error:e.message}));return json(res,{error:{type:'ToolMediaAlignmentError',message:e.message}},400);}
+    }
+    fs.writeFileSync(path.join(logDir,'forwarded-request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,sessionID:req.headers['x-cad-session-id']||null,body:payload},null,2)));
+    fs.writeFileSync(path.join(logDir,'media-alignment.json'),JSON.stringify({mode:'tool_multimodal_original',restored:mediaAudit},null,2));
+    const forwardedBody=payload?JSON.stringify(payload):null;
+    if(forwardedBody&&Buffer.byteLength(forwardedBody)>maxForwardedBytes){const error={type:'ToolMediaPayloadTooLarge',message:'The full model request exceeds the configured byte limit; no images or history were dropped or resized.',bytes:Buffer.byteLength(forwardedBody),limit:maxForwardedBytes};fs.writeFileSync(path.join(logDir,'response-error.json'),JSON.stringify(error));return json(res,{error},413);}
     const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
-    const upstreamResponse=await fetch(upstream.replace(/\/$/,'')+route,{method:req.method,headers:{authorization:'Bearer '+key,'content-type':'application/json'},...(payload?{body:JSON.stringify(payload)}:{}),signal:controller.signal});
+    const upstreamResponse=await fetch(upstream.replace(/\/$/,'')+route,{method:req.method,headers:{authorization:'Bearer '+key,'content-type':'application/json'},...(payload?{body:forwardedBody}:{}),signal:controller.signal});
+    if(!upstreamResponse.ok&&mediaAudit.length){const error=await upstreamResponse.text();fs.writeFileSync(path.join(logDir,'response-error.json'),clean(JSON.stringify({status:upstreamResponse.status,error})));return json(res,{error:{type:'MultimodalToolResponseRejected',message:'Upstream rejected the exact tool image request; no role conversion, image resizing or silent fallback was applied.',upstream_status:upstreamResponse.status,detail:clean(error)}},upstreamResponse.status);}
     res.writeHead(upstreamResponse.status,{'content-type':upstreamResponse.headers.get('content-type')||'application/json','cache-control':'no-cache','x-accel-buffering':'no'});
     const log=fs.createWriteStream(path.join(logDir,'response.'+(payload?.stream?'sse':'json')));
     const redactor=secretRedactor(key,b=>log.write(b));
@@ -61,7 +77,7 @@ const opencodeConfig={
   $schema:'https://opencode.ai/config.json',model:'cad-local/'+model,small_model:'cad-local/'+model,default_agent:'cad-code',
   plugin:[new URL('file://'+path.join(ROOT,'src/plugin.mjs')).href],instructions:[],
   enabled_providers:['cad-local'],compaction:{auto:true,prune:false,reserved:1024},
-  provider:{'cad-local':{name:'CAD Code · GPT6.1',npm:'@ai-sdk/openai-compatible',options:{baseURL:`http://127.0.0.1:${gatewayPort}/v1`,apiKey:gatewayToken},models:{[model]:{name:'GPT‑6.1 Sol',tool_call:true,reasoning:true,attachment:true,modalities:{input:['text','image'],output:['text']},limit:{context:262144,input:262144,output:16384}}}}},
+  provider:{'cad-local':{name:'CAD Code · GPT6.1',npm:wireAPI==='responses'?'@ai-sdk/openai':'@ai-sdk/openai-compatible',options:{baseURL:`http://127.0.0.1:${gatewayPort}/v1`,apiKey:gatewayToken},models:{[model]:{name:'GPT‑6.1 Sol',tool_call:true,reasoning:true,attachment:true,modalities:{input:['text','image'],output:['text']},limit:{context:262144,input:262144,output:16384}}}}},
   agent:{'cad-code':{description:'使用 SimpleCADAPI 完成建模、检查、导出和渲染',mode:'primary',model:'cad-local/'+model,temperature:1,prompt:'You are CAD Code, an interactive CAD coding agent. Reply in Chinese. Use the provided full SimpleCADAPI skill and the actual runtime. Read the skill first, route the task, inspect precise API pages, build and validate real artifacts. Use exec(code) for computation and file operations. Use question for requirements, todowrite for progress, and task with subagent_type="cad-review" for independent visual verification of artifacts under out/. Only claim observations actually returned by tools. Complete the requested work and give real artifact paths.',tools:{'*':false,exec:true,question:true,todowrite:true,task:true},permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}},'cad-review':{description:'独立检查父任务 out/ 下的真实渲染与验证结果，父产物只读。',mode:'subagent',model:'cad-local/'+model,temperature:1,prompt:'You are an independent CAD evidence reviewer. Inspect actual parent output artifacts through exec and image(view_image). Treat source comments and parent verdicts as claims. Return a concise Chinese evidence-based verdict and limitations. Never edit parent files or claim unobserved checks.',tools:{'*':false,exec:true},permission:{'*':'deny',exec:'allow'}},compaction:{model:'cad-local/'+model,temperature:1}},
   permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}
 };
@@ -94,7 +110,7 @@ app=http.createServer(async(req,res)=>{
   try{
     const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${port}`&&origin!==`http://localhost:${port}`)return json(res,{error:'Origin refused'},403);
     const url=new URL(req.url,`http://127.0.0.1:${port}`),route=url.pathname;
-    if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,skill:'SimpleCADAPI 2.2.5',python:PYTHON});
+    if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,wireAPI,toolImageMode:'tool_multimodal_original',skill:'SimpleCADAPI 2.2.5',python:PYTHON});
     if(route==='/api/sessions'){
       if(req.method==='POST'){const a=await readJSON(req),s=await oc('/session','POST',{title:a.title||'新的 CAD 任务'});const work=sessionDir(s.id);fs.mkdirSync(work,{recursive:true});return json(res,s);}
       return json(res,await oc('/session'));
@@ -113,7 +129,20 @@ app=http.createServer(async(req,res)=>{
         const ext=path.extname(p).toLowerCase(),type=['.png','.jpg','.jpeg','.step','.stp','.stl','.json'].includes(ext)?mime(p):'text/plain; charset=utf-8';
         res.writeHead(200,{'content-type':type,'x-content-type-options':'nosniff','cache-control':'no-store',...(url.searchParams.has('download')?{'content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(path.basename(p))}`}:{})});return fs.createReadStream(p).pipe(res);
       }
-      if(action==='export'){const data=await oc(`/session/${id}/message`);res.writeHead(200,{'content-type':'application/json','content-disposition':`attachment; filename="${id}.json"`});return res.end(JSON.stringify({schema_version:'cad-code-session-v1',id,model,messages:data},null,2));}
+      if(action==='tool-image'){
+        const callID=url.searchParams.get('call'),index=Number(url.searchParams.get('index'));
+        if(!callID||!Number.isSafeInteger(index)||index<0)throw Error('Invalid image reference');
+        const record=loadToolMedia(callID,{sessionID:id});const part=record?.content.filter(p=>p.type==='input_image')[index];
+        if(!part)throw Error('Tool image not found');const [header,data]=part.image_url.split(',');
+        res.writeHead(200,{'content-type':header.slice(5,header.indexOf(';')),'x-content-type-options':'nosniff','cache-control':'no-store'});return res.end(Buffer.from(data,'base64'));
+      }
+      if(action==='export'){
+        const data=await oc(`/session/${id}/message`),toolMedia=[];
+        for(const message of data)for(const part of message.parts||[])if(part.type==='tool'&&part.state?.metadata?.cadMedia){
+          const record=loadToolMedia(part.callID,{sessionID:id});if(!record)throw Error('ToolMediaAlignmentError: original image record missing from export');toolMedia.push(record);
+        }
+        res.writeHead(200,{'content-type':'application/json','content-disposition':`attachment; filename="${id}.json"`});return res.end(JSON.stringify({schema_version:'cad-code-session-v2',id,model,messages:data,tool_media:toolMedia},null,2));
+      }
     }
     if(route==='/api/questions')return json(res,await oc('/question'));
     const q=route.match(/^\/api\/questions\/([^/]+)\/reply$/);

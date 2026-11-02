@@ -3,15 +3,31 @@ import {executeCode,stopWorkers} from './executor.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {PYTHON,SKILL,ROOT,sessionDir} from './paths.mjs';
+import {saveToolMedia,mediaHash,mediaReceipt} from './tool-media.mjs';
 export default async function CADCodePlugin({client}) {
   async function reviewRoots(sessionID){try{const r=await client.session.get({path:{id:sessionID}});return r.data?.parentID?[sessionDir(r.data.parentID)+'/out']:[];}catch{return [];}}
   return {
     tool:{exec:tool({
       description:'Execute JavaScript orchestration in this CAD task workspace. Write code using await tools.exec_command({cmd:"..."}), text(result.output), tools.apply_patch("*** Begin Patch..."), tools.write_stdin({session_id,...}), image(await tools.view_image({path:"out/model.png"})). ALL_TOOLS lists the actual subtools. Keep dependent actions sequential. Print observations with text(). This is executable JavaScript, not a shell-command array.',
       args:{code:tool.schema.string().describe('Complete JavaScript source, with original newlines.')},
-      async execute({code},context){context.metadata({title:'执行 CAD 编排',metadata:{code}});const r=await executeCode(context.sessionID,code,context.abort,await reviewRoots(context.sessionID));if(r.error)throw Error(r.output);return r;}
+      async execute({code},context){
+        context.metadata({title:'执行 CAD 编排',metadata:{code}});
+        const r=await executeCode(context.sessionID,code,context.abort,await reviewRoots(context.sessionID));
+        if(r.content?.some(p=>p.type==='input_image')){
+          if(!context.callID)throw Error('ToolMediaAlignmentError: OpenCode did not provide callID');
+          const observedOutput=(r.output?r.output+'\n':'')+mediaReceipt(context.callID,r.content);
+          saveToolMedia(context.callID,{sessionID:context.sessionID,code,output:observedOutput,content:r.content,failed:Boolean(r.error)});
+          // No OpenCode attachment: that route resizes media and turns it into a
+          // synthetic user message. The gateway restores this exact tool result.
+          let imageIndex=0;const parts=r.content.map(p=>p.type==='input_text'?p:{type:'input_image',index:imageIndex++});
+          const metadata={cadMedia:{version:1,sessionID:context.sessionID,callID:context.callID,visibleOutput:r.output,parts,contentHash:mediaHash(JSON.stringify(r.content)),images:r.attachments.map((a,index)=>({index,mime:a.mime,filename:a.filename}))},...(r.error?{cadExecutionError:true}:{})};
+          return {output:observedOutput,title:r.error?'CAD 编排返回错误与图片证据':'执行 CAD 编排',metadata};
+        }
+        if(r.error)throw Error(r.output);return {output:r.output};
+      }
     })},
     'chat.params':async(_,out)=>{out.temperature=1;out.options={...out.options,reasoningEffort:'high'};},
+    'chat.headers':async(input,out)=>{out.headers['x-cad-session-id']=input.sessionID;},
     'experimental.chat.system.transform':async(input,out)=>{
       if(!input.sessionID)return;
       const inputs=path.join(sessionDir(input.sessionID),'input');if(fs.existsSync(inputs))out.system.push('Files explicitly supplied for this session: '+fs.readdirSync(inputs).map(x=>'input/'+x).join(', ')+'. Read them only within this session workspace.');

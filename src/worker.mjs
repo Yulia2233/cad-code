@@ -25,7 +25,7 @@ const descriptions = [
   {name:'exec_command',description:'Run a shell command in the CAD workspace. Arguments: cmd:string, workdir?:string, yield_time_ms?:number (default10000, max30000), max_output_tokens?:number, login?:boolean. Returns output/exit_code or session_id for a running process. Use text(result) to preserve session IDs. Noninteractive stdin is EOF.'},
   {name:'write_stdin',description:'Poll or write to a running command. Arguments: session_id:number, chars?:string, yield_time_ms?:number, max_output_tokens?:number.'},
   {name:'apply_patch',description:'Apply an exact *** Begin Patch / Add File / Update File / Delete File / *** End Patch patch. Pass the complete patch as one string.'},
-  {name:'view_image',description:'Load a PNG/JPEG in this workspace. Arguments: path:string. Use image(await tools.view_image({path:"out/model.png"})) to show it to the model.'}
+  {name:'view_image',description:'Load a PNG/JPEG without resizing. Arguments: path:string, detail?:"original"|"high"|"low"|"auto". Returns image_url and detail. Emit it with const r=await tools.view_image({path:"out/model.png"}); image(r.image_url, r.detail). A read without image() does not show an image.'}
 ];
 const tools = {
   async exec_command(args) {
@@ -59,7 +59,8 @@ const tools = {
     const type=/\.png$/i.test(p)?'image/png':/\.jpe?g$/i.test(p)?'image/jpeg':null;
     if(!type)throw Error('Only PNG and JPEG are supported');
     const b=fs.readFileSync(p);if(b.length>12*1024*1024)throw Error('Image exceeds12MiB');
-    return {image_url:`data:${type};base64,${b.toString('base64')}`,filename:path.basename(p)};
+    if(args.detail!==undefined&&!['original','high','low','auto'].includes(args.detail))throw Error('Unsupported image detail');
+    return {image_url:`data:${type};base64,${b.toString('base64')}`,filename:path.basename(p),...(args.detail?{detail:args.detail}:{})};
   }
 };
 function applyPatch(patch) {
@@ -93,18 +94,24 @@ function applyPatch(patch) {
   return {output:changes.map(x=>(x.remove?'Deleted ':'Wrote ')+x.name).join('\n')};
 }
 async function execute({id,code}) {
-  const output=[],attachments=[],timers=new Set(),pending=new Set();let closed=false,fatal=false;
-  const text=value=>output.push(typeof value==='string'?value:JSON.stringify(value));
-  const image=value=>{
+  const output=[],attachments=[],content=[],views=new Map(),timers=new Set(),pending=new Set();let closed=false,fatal=false,imageBytes=0;
+  const text=value=>{const body=typeof value==='string'?value:JSON.stringify(value);output.push(body);content.push({type:'input_text',text:body});};
+  const image=(value,detail)=>{
     const url=typeof value==='string'?value:value?.image_url;
     if(!/^data:image\/(png|jpeg);base64,/.test(url||''))throw Error('image() requires a view_image result');
-    attachments.push({type:'file',mime:url.slice(5,url.indexOf(';')),url,filename:value?.filename||'image.png'});
+    const hint=views.get(url),selectedDetail=detail??value?.detail??hint?.detail;
+    if(selectedDetail!==undefined&&!['original','high','low','auto'].includes(selectedDetail))throw Error('Unsupported image detail');
+    const bytes=Buffer.from(url.split(',')[1],'base64').length;
+    if(attachments.length>=16||imageBytes+bytes>48*1024*1024)throw Error('ImageOutputBudgetExceeded: maximum16 images and48MiB per exec; no image was resized or silently dropped');
+    imageBytes+=bytes;
+    content.push({type:'input_image',image_url:url,...(selectedDetail?{detail:selectedDetail}:{})});
+    attachments.push({type:'file',mime:url.slice(5,url.indexOf(';')),url,filename:value?.filename||hint?.filename||'image.png'});
   };
   try {
     record({kind:'exec_start',id,code});
     const scopedTools=Object.fromEntries(Object.entries(tools).map(([name,fn])=>[name,async(...args)=>{
       if(closed)throw Error('exec context already completed');
-      const p=fn(...args);pending.add(p);try{return await p;}finally{pending.delete(p);}
+      const p=fn(...args);pending.add(p);try{const result=await p;if(name==='view_image')views.set(result.image_url,result);return result;}finally{pending.delete(p);}
     }]));
     const schedule=(fn,ms,...args)=>{if(closed)throw Error('exec context already completed');const id=setTimeout(()=>{timers.delete(id);if(!closed)fn(...args);},ms);timers.add(id);return id;};
     const context=vm.createContext({tools:scopedTools,ALL_TOOLS:descriptions,text,image,console:{log:text},setTimeout:schedule,clearTimeout:id=>{timers.delete(id);clearTimeout(id);}});
@@ -113,9 +120,9 @@ async function execute({id,code}) {
     try {await Promise.race([script.runInContext(context,{timeout:2000}),new Promise((_,reject)=>{timeout=setTimeout(()=>{fatal=true;reject(Error('exec timed out after120seconds; execution worker will be terminated'));},120000);})]);}
     finally {clearTimeout(timeout);}
     if(pending.size){fatal=true;throw Error('Unawaited subtool calls remain; await all tool calls before exec completes');}
-    const result={output:output.join('\n')||'(completed; use text() to print tool results)',attachments};
+    const result={output:output.join('\n')||(attachments.length?'':'(completed; use text() to print tool results)'),attachments,content};
     record({kind:'exec_complete',id,...result});return {id,result};
-  }catch(e){const result={output:output.join('\n')+'\n'+e.name+': '+e.message,attachments,error:true};record({kind:'exec_error',id,...result});return {id,result,fatal};}
+  }catch(e){const error=e.name+': '+e.message;content.push({type:'input_text',text:error});const result={output:output.join('\n')+'\n'+error,attachments,content,error:true};record({kind:'exec_error',id,...result});return {id,result,fatal};}
   finally{closed=true;for(const timer of timers)clearTimeout(timer);}
 }
 const input=readline.createInterface({input:process.stdin});

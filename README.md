@@ -45,10 +45,13 @@ Agent 调用标准 `tool_calls` 中的 `exec({code})`，JavaScript 内使用：
 ```javascript
 const r = await tools.exec_command({cmd: "pwd"});
 text(r); // 保留 output、exit_code 和运行中 session_id
-// image(await tools.view_image({path: "out/model.png"}));
+const view = await tools.view_image({path: "out/model.png", detail: "original"});
+image(view.image_url, view.detail);
 ```
 
 支持 `exec_command`、`write_stdin`、`apply_patch`、`view_image`、`text`、`image`、`ALL_TOOLS`。OpenCode 的 `question`、`todowrite`、`task` 用于需求确认、进度和独立 `cad-review`。子评审只读父任务 `out/`，不能修改父产物。
+
+图片调用默认经 **Responses API** 返回到原 `function_call_output`：保留 `text → image → text` 的实际顺序和原图字节，不走 OpenCode 的附件缩图/合成用户消息。`image(view)` 也可使用；仅 `await view_image()` 不展示图片。`detail=original` 明确映射为上游支持的 `high`，映射留审计；这不表示可控制模型内部的视觉编码。旧会话按原样保留。
 
 | 位置 | 内容 |
 |---|---|
@@ -56,6 +59,7 @@ text(r); // 保留 output、exit_code 和运行中 session_id
 | `workspace/<session-id>/.cad-events.jsonl` | 原始 JS、完整命令输出、错误、图像与执行记录 |
 | `.runtime/xdg/data/opencode/` | OpenCode 会话数据库 |
 | `.runtime/model-requests/` | 实际模型请求和完整流式返回，凭据脱敏 |
+| `.runtime/tool-media/` | 按会话/工具调用绑定的完整有序文本与原图，供请求恢复和网页预览 |
 | `.runtime/events.jsonl` | OpenCode 事件归档 |
 
 网页可查看输入、接口返回的思考、正文、工具调用和结果，展开/折叠、上传文件、预览渲染、下载代码/产物和完整会话 JSON。不会宣称保存 API 未返回的内部思考。
@@ -68,7 +72,7 @@ text(r); // 保留 output、exit_code 和运行中 session_id
 npm test
 ```
 
-支持通过 `CAD_CODE_MODEL`、`CAD_CODE_PYTHON`、`CAD_CODE_SKILL`、`OPENCODE_BIN` 覆盖默认组件；更换模型需重启正在运行的后端。默认端口：网页8772、OpenCode18134、模型网关18135，均绑定本机。
+支持通过 `CAD_CODE_MODEL`、`CAD_CODE_PYTHON`、`CAD_CODE_SKILL`、`OPENCODE_BIN` 覆盖默认组件；`CAD_CODE_WIRE_API=responses` 为默认，也可显式改为 `chat`。不同供应商是否真的支持工具图片必须实测：本次GPT‑6.1接口的Chat工具图片被忽略，Responses已通过实际读图验证；程序不会自动降级、删图或改成用户图片。更换模型/协议需重启后端。默认端口：网页8772、OpenCode18134、模型网关18135，均绑定本机。
 
 本项目是受限兼容原型：CAD 子进程使用非交互 stdin，尚不支持 PTY；执行隔离依赖 macOS Seatbelt，Node `vm` 本身不是安全边界。详细能力边界见报告。
 

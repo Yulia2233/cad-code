@@ -125,6 +125,45 @@ test('view_image emits a model-visible attachment without inserting base64 into 
   assert.deepEqual(Buffer.from(result.attachments[0].url.split(',')[1],'base64'),png);
 });
 
+test('worker records the exact interleaved order of emitted text and original image content',async()=>{
+  const {id,dir}=fixture('ordered_media'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'preview.png'),png);
+  const result=await executeCode(id,'text("before");image(await tools.view_image({path:"preview.png",detail:"original"}));text("after");');
+  assert.deepEqual(result.content,[{type:'input_text',text:'before'},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'original'},{type:'input_text',text:'after'}]);
+  assert.equal(result.output,'before\nafter');
+  const events=fs.readFileSync(path.join(dir,'.cad-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.find(e=>e.kind==='exec_complete').content,result.content);
+});
+
+test('worker preserves emitted image evidence and ordering when a later tool action fails',async()=>{
+  const {id,dir}=fixture('failed_media'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'preview.png'),png);
+  const result=await executeCode(id,'text("before failure");image(await tools.view_image({path:"preview.png"}));throw Error("inspect failed");');
+  assert.equal(result.error,true);assert.deepEqual(result.content,[{type:'input_text',text:'before failure'},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64')},{type:'input_text',text:'Error: inspect failed'}]);
+});
+
+test('17 emitted images fail the budget visibly while retaining the first 16 images in exact order',async()=>{
+  const {id,dir}=fixture('image_budget'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'pixel.png'),png);
+  const result=await executeCode(id,'const r=await tools.view_image({path:"pixel.png",detail:"original"});for(let i=0;i<17;i++){text("image "+i);image(r);}');
+  assert.equal(result.error,true);assert.match(result.output,/ImageOutputBudgetExceeded/);assert.equal(result.attachments.length,16);
+  const expected=[];for(let i=0;i<16;i++){expected.push({type:'input_text',text:'image '+i},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'original'});}
+  expected.push({type:'input_text',text:'image 16'});
+  assert.deepEqual(result.content.slice(0,-1),expected);assert.match(result.content.at(-1).text,/ImageOutputBudgetExceeded/);
+  const events=fs.readFileSync(path.join(dir,'.cad-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.find(e=>e.kind==='exec_error').content,result.content);
+});
+
+test('URL-only image emission inherits view metadata, accepts explicit detail override, and read-only views emit nothing',async()=>{
+  const {id,dir}=fixture('image_detail'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'source-preview.png'),png);
+  const emitted=await executeCode(id,'const r=await tools.view_image({path:"source-preview.png",detail:"original"});image(r.image_url);image(r.image_url,"low");');
+  assert.deepEqual(emitted.content,[{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'original'},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'low'}]);
+  assert.deepEqual(emitted.attachments.map(x=>x.filename),['source-preview.png','source-preview.png']);
+  const readOnly=await executeCode(id,'await tools.view_image({path:"source-preview.png",detail:"original"});');
+  assert.deepEqual(readOnly.content,[]);assert.deepEqual(readOnly.attachments,[]);assert.equal(readOnly.error,undefined);
+});
+
 test('sandbox blocks shell reads/writes and symlink access to another workspace',async()=>{
   const own=fixture('isolation'),other=fixture('other');
   fs.writeFileSync(path.join(other.dir,'private.txt'),'PRIVATE_SENTINEL');
