@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CAD Code · 建模工作台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="CAD Code 首页"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m16 3 12 7v13l-12 7L4 23V10Z M4 10l12 7 12-7 M16 17v13 M10 6l12 7v7"/></svg><span>CAD<span class="brand-light"> Code</span></span><span class="local-tag">LOCAL</span></a>
+    <div class="top-meta"><span id="modelName">连接模型…</span><span class="divider"></span><span id="skillName">SimpleCADAPI</span><span id="connection" class="connection"><i></i>连接中</span></div>
+  </header>
+
+  <div class="workspace">
+    <aside class="sessions-pane">
+      <button id="newSession" class="new-session"><span>＋</span> 新建任务 <kbd>⌘ K</kbd></button>
+      <div class="section-caption"><span>任务记录</span><span id="sessionCount">0</span></div>
+      <nav id="sessionList" aria-label="CAD 任务列表"></nav>
+      <div class="sidebar-foot"><span class="persist-dot"></span><div>会话保存在本机<small>刷新页面后可继续查看</small></div></div>
+    </aside>
+
+    <main class="chat-pane">
+      <div class="chat-head"><div><span class="eyebrow">建模工作台</span><h1 id="sessionTitle">开始一个 CAD 任务</h1></div><div class="head-actions"><span id="taskStatus" class="task-status">就绪</span><a id="exportSession" class="icon-button" hidden title="下载完整会话 JSON" aria-label="下载完整会话 JSON">↓</a></div></div>
+      <div id="errorBanner" class="error-banner" role="alert" hidden><span id="errorText"></span><button id="dismissError" aria-label="关闭错误提示">×</button></div>
+      <div id="conversationScroll" class="conversation-scroll">
+        <section id="welcome" class="welcome">
+          <div class="welcome-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="m24 5 17 10v19L24 44 7 34V15Z M7 15l17 10 17-10 M24 25v19 M16 10l17 10v10"/></svg></div>
+          <span class="eyebrow">从想法，到可验证的几何体</span>
+          <h2>你想做一个什么零件？</h2>
+          <p>描述尺寸与结构，或上传 STEP、图片和参考文件。<br>在这里查看建模过程、运行结果与生成产物。</p>
+          <div class="example-prompts">
+            <button data-example="创建一个 60×40×8 mm 的矩形安装板，四个角各有一个直径 5 mm 的通孔，孔心距离相邻两边均为 8 mm。尺寸和形状已经确认，无其他功能要求。请使用 SimpleCADAPI 2.2.5 建模，导出 STEP、STL 和等测预览图，并检查模型有效性。"><span class="example-icon">▱</span><span>四孔安装板<small>尺寸明确 · 建模与导出</small></span><span class="arrow">↗</span></button>
+            <button data-example="创建一个外径 30 mm、内径 16 mm、高 20 mm 的圆筒，轴线为 Z 轴，底面位于 Z=0。形状和尺寸已经确认。请使用 SimpleCADAPI 2.2.5，导出 STEP、STL 和等测预览图，并检查模型有效性。"><span class="example-icon">◎</span><span>参数化圆筒<small>圆柱与孔 · 检查与渲染</small></span><span class="arrow">↗</span></button>
+            <button data-example="我想重建一个 STEP 零件。请先检查我上传的 input/ 文件，读取完整 simplecadapi skill，分析几何结构，给出重建方案。"><span class="example-icon">⌘</span><span>从 STEP 开始<small>先上传文件 · 分析与重建</small></span><span class="arrow">↗</span></button>
+          </div>
+        </section>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <div id="questions" class="questions"></div>
+        <div id="runningIndicator" class="running-indicator" hidden><i></i><i></i><i></i><span>Agent 正在处理</span></div>
+      </div>
+      <form id="composer" class="composer">
+        <div id="uploadChips" class="upload-chips" hidden></div>
+        <textarea id="prompt" placeholder="描述你的零件、尺寸，或希望修改的地方…" rows="3" aria-label="给 CAD Agent 的消息"></textarea>
+        <div class="composer-actions"><div><button id="uploadButton" type="button" class="upload-button"><span>＋</span> 添加文件</button><span id="composerHint">Enter 发送 · Shift + Enter 换行</span></div><div><button id="stopButton" type="button" class="stop-button" hidden><span>■</span> 停止</button><button id="sendButton" type="submit" class="send-button">发送 <span>↑</span></button></div></div>
+        <input id="fileInput" type="file" multiple hidden accept=".step,.stp,.png,.jpg,.jpeg,.pdf,.py,.json,.jsonl,.dxf,.stl,.scadpkg,.md,.txt">
+      </form>
+      <div class="chat-foot"><span>执行真实工具，产物保存在本地工作目录。</span><span id="modelOptions">temperature 1 · 256k · vision</span></div>
+    </main>
+
+    <aside class="artifacts-pane">
+      <div class="artifacts-head"><h2>工作产物</h2><span id="fileCount">0</span></div>
+      <div class="preview-area" id="previewArea"><div id="previewEmpty" class="preview-empty"><svg viewBox="0 0 60 60" aria-hidden="true"><path d="m30 10 18 10v21L30 51 12 41V20Z M12 20l18 11 18-11 M30 31v20"/></svg><strong>等待第一份产物</strong><span>渲染图和代码会出现在这里</span></div><img id="previewImage" hidden alt="生成模型的渲染预览"><pre id="previewCode" hidden></pre></div>
+      <div id="previewCaption" class="preview-caption" hidden><span id="previewPath"></span><a id="previewDownload" class="icon-button" title="下载文件" aria-label="下载预览文件">↓</a></div>
+      <div class="file-section-head"><span>工作目录</span><span id="artifactRefreshLabel">自动更新</span></div>
+      <div id="fileList" class="file-list"><p class="empty-files">还没有文件</p></div>
+      <div class="artifacts-note">点击查看代码或图片，点击 ↓ 下载文件。<br>工具结果和会话正文完整保留。</div>
+    </aside>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

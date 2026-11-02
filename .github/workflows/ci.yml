@@ -1,0 +1,25 @@
+name: Test and package
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Package source
+        run: tar --exclude=.git --exclude=node_modules --exclude=.runtime --exclude=workspace -czf "$RUNNER_TEMP/cad-code-source.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cad-code-source
+          path: ${{ runner.temp }}/cad-code-source.tar.gz

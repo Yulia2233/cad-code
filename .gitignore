@@ -1,0 +1,10 @@
+node_modules/
+.runtime/
+workspace/
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+credentials.json

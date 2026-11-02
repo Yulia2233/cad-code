@@ -1,0 +1,11 @@
+{
+  "name": "cad-code-local",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {"cad-code": "./cad-code"},
+  "scripts": {"start": "node src/cli.mjs", "web": "node src/cli.mjs --web", "setup": "node scripts/setup.mjs", "test": "node --test test/*.test.mjs"},
+  "engines": {"node": ">=22"},
+  "dependencies": {"@opencode-ai/plugin": "1.18.27"}
+}
