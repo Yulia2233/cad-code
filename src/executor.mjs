@@ -12,10 +12,14 @@ export function sandboxProfile(work,readOnlyRoots=[]) {
   const read=['/System','/Library','/usr','/bin','/sbin','/dev','/opt/homebrew','/private/etc','/private/var/db',path.dirname(nodePath),path.join(ROOT,'src'),path.join(ROOT,'tools'),pythonRoot,...(fs.existsSync(pythonRoot)?[fs.realpathSync(pythonRoot)]:[]),path.join(REPO,'envs/cad226'),SKILL,work,...libraryRoots,...readOnlyRoots];
   return `(version 1)\n(deny default)\n(allow process-fork)\n(allow process-exec)\n(allow signal (target self) (target children))\n(allow sysctl-read)\n(allow mach-lookup)\n(allow file-read-metadata)\n(allow file-read* (literal "/") ${read.map(x=>'(subpath '+quote(x)+')').join(' ')})\n(allow file-write* (subpath ${quote(work)}) (literal "/dev/null") (literal "/dev/tty"))\n`;
 }
+export function prepareSessionWorkspace(sessionID){
+  const work=sessionDir(sessionID);fs.mkdirSync(work,{recursive:true});
+  if(!fs.existsSync(path.join(work,'.git'))){const git=spawnSync('git',['init','--quiet'],{cwd:work});if(git.status!==0)throw Error('Could not initialize session Git workspace');if(!fs.existsSync(path.join(work,'.gitignore')))fs.writeFileSync(path.join(work,'.gitignore'),'.tmp/\n.home/\n.cad-events.jsonl\n.conversation.json\n__marimo__/\n__pycache__/\nout/\n');}
+  return work;
+}
 function worker(sessionID,readOnlyRoots=[]) {
   if(workers.has(sessionID))return workers.get(sessionID);
-  const work=sessionDir(sessionID);fs.mkdirSync(work,{recursive:true});
-  if(!fs.existsSync(path.join(work,'.git'))){spawnSync('git',['init','--quiet'],{cwd:work});fs.writeFileSync(path.join(work,'.gitignore'),'.tmp/\n.home/\n.cad-events.jsonl\n.conversation.json\n__marimo__/\n__pycache__/\nout/\n');}
+  const work=prepareSessionWorkspace(sessionID);
   for(const d of ['.tmp','.home'])fs.mkdirSync(path.join(work,d),{recursive:true});
   const env={PATH:path.dirname(PYTHON)+':/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',HOME:path.join(work,'.home'),TMPDIR:path.join(work,'.tmp'),LANG:'en_US.UTF-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',OMP_NUM_THREADS:'2',MPLCONFIGDIR:path.join(work,'.tmp/mpl'),SIMPLECAD_VTK_RENDER_LOCK:path.join(work,'.tmp/vtk-render.lock'),CAD_CODE_WORK:work,CAD_CODE_READONLY:JSON.stringify(readOnlyRoots),CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL};
   const child=spawn('/usr/bin/sandbox-exec',['-p',sandboxProfile(work,readOnlyRoots),process.env.CAD_CODE_NODE||process.execPath,path.join(ROOT,'src/worker.mjs')],{cwd:work,env,stdio:['pipe','pipe','pipe']});

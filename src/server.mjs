@@ -6,6 +6,9 @@ import {spawn} from 'node:child_process';
 import {ROOT,RUNTIME,WORKSPACE,PYTHON,SKILL,sessionDir,inside} from './paths.mjs';
 import {sseDecoder,secretRedactor} from './streams.mjs';
 import {restoreToolMedia,restoreResponsesToolMedia,loadToolMedia} from './tool-media.mjs';
+import {MAIN_PROMPT_MARKER,REVIEW_PROMPT_MARKER,loadPromptTemplates} from './prompts.mjs';
+// Validate source documents before opening listeners or starting a model runner.
+loadPromptTemplates();
 const port=Number(process.env.PORT||8772),ocPort=Number(process.env.CAD_CODE_OPENCODE_PORT||18134),gatewayPort=Number(process.env.CAD_CODE_GATEWAY_PORT||18135);
 const model=process.env.CAD_CODE_MODEL||'gpt-6.1-sol';
 const wireAPI=process.env.CAD_CODE_WIRE_API||'responses';
@@ -78,7 +81,7 @@ const opencodeConfig={
   plugin:[new URL('file://'+path.join(ROOT,'src/plugin.mjs')).href],instructions:[],
   enabled_providers:['cad-local'],compaction:{auto:true,prune:false,reserved:1024},
   provider:{'cad-local':{name:'CAD Code · GPT6.1',npm:wireAPI==='responses'?'@ai-sdk/openai':'@ai-sdk/openai-compatible',options:{baseURL:`http://127.0.0.1:${gatewayPort}/v1`,apiKey:gatewayToken},models:{[model]:{name:'GPT‑6.1 Sol',tool_call:true,reasoning:true,attachment:true,modalities:{input:['text','image'],output:['text']},limit:{context:262144,input:262144,output:16384}}}}},
-  agent:{'cad-code':{description:'使用 SimpleCADAPI 完成建模、检查、导出和渲染',mode:'primary',model:'cad-local/'+model,temperature:1,prompt:'You are CAD Code, an interactive CAD coding agent. Reply in Chinese. Use the provided full SimpleCADAPI skill and the actual runtime. Read the skill first, route the task, inspect precise API pages, build and validate real artifacts. Use exec(code) for computation and file operations. Use question for requirements, todowrite for progress, and task with subagent_type="cad-review" for independent visual verification of artifacts under out/. Only claim observations actually returned by tools. Complete the requested work and give real artifact paths.',tools:{'*':false,exec:true,question:true,todowrite:true,task:true},permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}},'cad-review':{description:'独立检查父任务 out/ 下的真实渲染与验证结果，父产物只读。',mode:'subagent',model:'cad-local/'+model,temperature:1,prompt:'You are an independent CAD evidence reviewer. Inspect actual parent output artifacts through exec and image(view_image). Treat source comments and parent verdicts as claims. Return a concise Chinese evidence-based verdict and limitations. Never edit parent files or claim unobserved checks.',tools:{'*':false,exec:true},permission:{'*':'deny',exec:'allow'}},compaction:{model:'cad-local/'+model,temperature:1}},
+  agent:{'cad-code':{description:'使用 SimpleCADAPI 完成建模、检查、导出和渲染',mode:'primary',model:'cad-local/'+model,temperature:1,prompt:MAIN_PROMPT_MARKER,tools:{'*':false,exec:true,question:true,todowrite:true,task:true},permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}},'cad-review':{description:'独立检查父任务 out/ 下的真实渲染与验证结果，父产物只读。',mode:'subagent',model:'cad-local/'+model,temperature:1,prompt:REVIEW_PROMPT_MARKER,tools:{'*':false,exec:true},permission:{'*':'deny',exec:'allow'}},compaction:{model:'cad-local/'+model,temperature:1}},
   permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}
 };
 const configPath=path.join(RUNTIME,'opencode.json');fs.writeFileSync(configPath,JSON.stringify(opencodeConfig,null,2),{mode:0o600});

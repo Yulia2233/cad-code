@@ -68,6 +68,8 @@ image(view.image_url, view.detail);
 
 默认 `temperature=1`、`reasoning_effort=high`、vision、262144 上下文，输出预算 16384。完整验证结果、设计和限制见 [开发与架构报告](docs/implementation-report.md)。
 
+前两段提示词来自 [英文系统模板](docs/system-prompt.en.md) 和 [运行时模板](docs/runtime-prompt.md) 的英文块，由 plugin 每次请求编译。模型、日期、会话工作目录、Python/skill/工具路径、输入文件和评审父路径动态填充；不会把模板占位符、中文对照或文档说明发送给模型，也不重复追加旧 OpenCode 环境信息。渲染结果及模板 SHA‑256 保存在 `.runtime/prompt-snapshots/`，CLI 和网页使用同一套编译逻辑。
+
 ```bash
 npm test
 ```

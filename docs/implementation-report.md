@@ -42,6 +42,7 @@ flowchart TD
 | `cad-code`、`src/cli.mjs` | 统一启动入口、终端连接、run/continue/session、文件导入、后端重用与所有权清理 |
 | `src/server.mjs` | 配置隔离、OpenCode 生命周期、模型网关、网页 API、会话与事件归档 |
 | `src/plugin.mjs` | 注册 exec 工具、提供真实环境/skill、处理原生错误、连接独立 cad-review |
+| `src/prompts.mjs` | 严格编译英文系统/运行时模板，解析动态会话字段并保存来源哈希与渲染快照 |
 | `src/executor.mjs` | 每会话 worker、Seatbelt 权限、请求配对、取消、只读父产物授权 |
 | `src/worker.mjs` | 执行 JS、调度子进程、补丁、图片、异步轮询及完整执行日志 |
 | `src/streams.mjs` | UTF-8/SSE 分块解码、跨块凭据脱敏 |
@@ -136,6 +137,16 @@ worker保存有序 `input_text/input_image`，插件取得真实OpenCode `sessio
 真实端到端验收：以3240×2160原图输出 `text("BEFORE_IMAGE") → image(...) → text("AFTER_IMAGE")`，转发原图bytes与本地SHA完全相同，原生工具内容顺序一致，合成user图片数为0；GPT‑6.1准确读出图内随机 `CAD-352A63`。重启后再次用旧写法 `image(r.image_url)` 验证，历史与新调用两份原图均恢复且再次准确读图。网页也已验证工具内按原顺序显示文字/图片/文字，图片naturalWidth/naturalHeight保持3240×2160。原始 `detail=original` 显式映射到API支持的 `high`，不宣称可以约束供应商内部视觉处理。这里只对齐客户端可观察的调用、内容顺序和图片数据。
 
 官方接口依据：[Function calling](https://developers.openai.com/api/docs/guides/function-calling) 支持工具结果返回图片/文件数组；第三方供应商兼容性仍以上述实测为准。
+
+## 英文提示词模板接入（2026-11-03 更新）
+
+前两段分别来自 `docs/system-prompt.en.md` 全文、`docs/runtime-prompt.md` 的 English 主块及英文条件块。plugin 每次请求读取文件后编译，动态填充当前模型名/ID、上海日期、实际会话cwd/Git状态、Python、skill、工具路径、输入文件及已核实的评审父目录。两段的工作区均指本会话执行目录，避免把其他会话所在的容器目录当成授权范围。
+
+仅在明确的 `cad-code/cad-review` agent 标记下替换原始系统段，移除旧短提示词和OpenCode自动追加的重复模型/环境信息；内部压缩及其他agent提示不套用主建模模板。review真实核实父会话后在第二段末尾加入只读角色范围，原工具权限也保持限制。模板使用单次字面替换，不执行表达式，不递归解释动态值；缺文件、未知/缺失占位符、英文块不完整或角色歧义都会明确失败。源文件哈希和实际两段保存至 `.runtime/prompt-snapshots/<session-id>/`。
+
+本次新增23项模板及真实plugin hook测试，全量 **85/85通过**。实际OpenCode Responses请求中恰有两段developer消息，与渲染快照逐字一致，无旧尾部、中文说明和残留占位符。在线请求已到达本地网关并保存，但本次上游API返回502（独立/models探针也返回502），因此没有将模型成功回复列为本次验收结果。CLI与网页共用plugin，不依赖前端拼接提示词。
+
+按用户指定内容接入，没有改写英文正文：系统模板要求使用用户语言，运行时模板仍要求最终中文；Python/SDK版本文字仍固定3.12/2.2.5，对应当前已配置环境。以后需要调整这两项时，应修改模板来源后重新验收，不能只改代码而让文档和实际输入分离。
 
 ## 体验入口
 
