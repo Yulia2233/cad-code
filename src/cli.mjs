@@ -6,7 +6,7 @@ import {ROOT,RUNTIME,WORKSPACE} from './paths.mjs';
 import {importFiles} from './cli-input.mjs';
 const argv=process.argv.slice(2);
 if(argv.includes('--help')||argv.includes('-h')){
-  console.log(`CAD Code · OpenCode terminal agent\n\n  ./cad-code                         打开交互终端\n  ./cad-code --continue              继续上次会话\n  ./cad-code --session ses_...        打开指定会话\n  ./cad-code --file target.step      复制输入文件并打开终端\n  ./cad-code run "任务"              执行一项任务并显示工具与思考\n  ./cad-code --mini                  使用紧凑终端界面\n  ./cad-code --credentials PATH      首次指定API配置文件\n  ./cad-code --web                   启动网页；CLI可同时连接\n\n默认模型 gpt-6.1-sol；完整 SimpleCADAPI2.2.5 skill。\n会话保存在 cad-code/.runtime，建模文件在 cad-code/workspace/<会话ID>/。`);process.exit(0);
+  console.log(`CAD Code · OpenCode terminal agent\n\n  ./cad-code                         打开交互终端\n  ./cad-code --continue              继续上次会话\n  ./cad-code --session ses_...        打开指定会话\n  ./cad-code --file target.step      复制输入文件并打开终端\n  ./cad-code run "任务"              执行一项任务并显示工具与思考\n  ./cad-code --mini                  使用紧凑终端界面\n  ./cad-code --credentials PATH      首次指定API配置文件\n  ./cad-code --web                   启动网页；CLI可同时连接\n\n默认模型 qwen-v8；完整 SimpleCADAPI2.2.5 skill。\n会话保存在 cad-code/.runtime，建模文件在 cad-code/workspace/<会话ID>/。`);process.exit(0);
 }
 const pass=[],inputFiles=[];let credentials;
 for(let i=0;i<argv.length;i++){
@@ -56,10 +56,10 @@ if(inputFiles.length){
   const imports=importFiles(sessionID,inputFiles);console.log('输入已复制到 '+path.join(WORKSPACE,sessionID)+': '+imports.join(', '));
   if(mode==='run')pass.push('\n本次输入文件已复制到会话工作区：'+imports.join(', ')+ '。请使用这些相对路径。');
 }
-console.log('\n  CAD Code · '+(connection.model||'gpt-6.1-sol')+' · SimpleCADAPI2.2.5\n  exec(code) · 本地CAD工作区 · Ctrl+C/Esc 按OpenCode界面操作\n');
+console.log('\n  CAD Code · '+(connection.model||'qwen-v8')+' · SimpleCADAPI2.2.5\n  exec(code) · 本地CAD工作区 · Ctrl+C/Esc 按OpenCode界面操作\n');
 const env={...process.env,OPENCODE_SERVER_PASSWORD:connection.password,OPENCODE_SERVER_USERNAME:'opencode',OPENCODE_CONFIG:path.join(RUNTIME,'opencode.json'),OPENCODE_CONFIG_DIR:path.join(RUNTIME,'xdg/config'),XDG_CONFIG_HOME:path.join(RUNTIME,'xdg/config'),XDG_DATA_HOME:path.join(RUNTIME,'xdg/data'),XDG_STATE_HOME:path.join(RUNTIME,'xdg/state'),XDG_CACHE_HOME:path.join(RUNTIME,'xdg/cache'),OPENCODE_DISABLE_CLAUDE_CODE:'true'};
 let command;
-if(mode==='run')command=['run','--attach',connection.url,'--dir',WORKSPACE,'--agent','cad-code','--model','cad-local/'+(connection.model||'gpt-6.1-sol'),'--thinking',...pass.slice(1)];
+if(mode==='run')command=['run','--attach',connection.url,'--dir',WORKSPACE,'--agent','cad-code','--model','cad-local/'+(connection.model||'qwen-v8'),'--thinking',...pass.slice(1)];
 else if(mode==='web'){
   console.log('可选网页: '+connection.website+'\n按Ctrl+C退出。');
   if(!ownsBackend)process.exit(0);

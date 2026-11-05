@@ -2,6 +2,12 @@
 
 ## Unreleased — 2026-11-02
 
+- 2026-11-05：修复 Qwen Responses 续轮兼容：只将历史助手消息中的 `output_text` 转为 `input_text`，保留文字、角色、顺序及工具调用/结果，并记录转换审计。该修复恢复续轮工具调用，不代表已解决纯文本进度回复后提前停止或完成重建。
+
+- 2026-11-05：默认推理模型切换为公网 Qwen v8（`qwen-v8`，Responses API、temperature=1、256k、vision、reasoning effort medium）。凭据保存在本机权限0600的`~/.secrets/cad-code-qwen-v8.json`；Qwen Responses工具图片为未声明detail的图像补high元数据并审计，保持原图字节不变。
+
+- 2026-11-05：CLI、网页及子会话创建工作区时自动复制 tools/，提供 stepir.py、cadeval.py、families_common.py 和完整评估依赖；提示词指向会话内工具，继续会话时保留已有文件。
+
 - 2026-11-03：前两段提示词改由英文系统/运行时文档模板编译，动态填充真实会话信息；移除旧提示词重复内容，并保留内部压缩及独立评审的角色边界。
 
 - 图片工具改用Responses原生多模态工具返回，保留原图字节、文字/图片顺序和调用归属。

@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-05",
+  "source": "STEP reverse-engineering training project research/tools",
+  "original_root": "/Users/liuyu/Documents/auto-research/step-8B-sft/research/tools",
+  "files": {
+    "stepir.py": "ed2eb04edb7864794d9110d181f2b3ec02707e7fb452910cd56b0986af25747b",
+    "cadeval.py": "ce43750aedff2cd4e2c2eca3948f5e9fdeb840ada175731a066c221454b4a23f",
+    "families_common.py": "1196f70599c8a0573a816cd4a30aee71f538369daa56b3250b101e67d188cdc1",
+    "cadthreads.py": "b46590c82f7cdcd71ac61b8374ac84922f9620a9908880dcb9a72f1bbf5601f2",
+    "robust_iou.py": "7521e80cb8c77251dd12ef47919334e858fe0adc015c0dc3cc0af60d0cc4a2f6",
+    "frozen/compare.py": "12c7b740934dba8db61b0743f91f6aab3160e4a47f1b18c783f8a027cb93e7ad"
+  },
+  "additional_local_helper": "cad.py",
+  "runtime_sdk": "2.2.5",
+  "historical_metrics_sdk": "2.1.4"
+}

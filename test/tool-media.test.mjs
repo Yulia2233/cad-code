@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {ROOT} from '../src/paths.mjs';
-import {restoreToolMedia,restoreResponsesToolMedia,mediaHash,mediaReceipt} from '../src/tool-media.mjs';
+import {restoreToolMedia,restoreResponsesToolMedia,defaultResponsesImageDetail,normalizeQwenResponsesHistory,mediaHash,mediaReceipt} from '../src/tool-media.mjs';
 
 const imageA='data:image/png;base64,AAEC/w==',imageB='data:image/jpeg;base64,/9j/AA==';
 const inputText=text=>({type:'input_text',text});
@@ -162,6 +162,29 @@ test('Responses already aligned native content is idempotent and does not duplic
 test('Responses text-only input retains exact identity without a sidecar',()=>{
   const input=[{role:'user',content:[inputText('question')]},responseCall('a'),responseOutput('a','plain result')];
   const restored=restoreResponsesToolMedia(input,{sessionID:'ses_media_test',load:()=>null});assert.strictEqual(restored.input,input);assert.deepEqual(restored.audit,[]);
+});
+
+test('Qwen Responses image defaults add high detail metadata without changing image bytes',()=>{
+  const input=[{role:'user',content:[inputText('read the render'),inputImage(imageA)]},responseCall('a'),responseOutput('a',[inputText('rendered'),inputImage(imageB,'low')])];
+  const result=defaultResponsesImageDetail(input,{detail:'high'});
+  assert.equal(result.input[0].content[1].detail,'high');assert.equal(result.input[0].content[1].image_url,imageA);
+  assert.equal(result.input[2].output[1].detail,'low');assert.equal(result.input[2].output[1].image_url,imageB);
+  assert.equal(result.audit.length,1);assert.equal(result.audit[0].location,'input[0].content[1]');assert.deepEqual(input[0].content[1],inputImage(imageA));assert.equal(input[2].output[1].detail,'low');
+});
+
+test('image detail adapter leaves text-only and already-detailed Responses unchanged',()=>{
+  const input=[{role:'user',content:[inputText('no image')]},responseOutput('a',[inputImage(imageA,'low')])],result=defaultResponsesImageDetail(input);
+  assert.strictEqual(result.input,input);assert.deepEqual(result.audit,[]);
+});
+
+test('Qwen continuation converts prior assistant output_text to input_text and preserves other transcript items',()=>{
+  const oldAssistant={role:'assistant',content:[{type:'output_text',text:'I will inspect the model.',annotations:[],logprobs:null}]};
+  const user={role:'user',content:[inputText('continue')]},call={type:'function_call',call_id:'a',name:'exec',arguments:'{}'};
+  const output={type:'function_call_output',call_id:'a',output:[inputText('tool result')]};
+  const input=[user,oldAssistant,call,output],result=normalizeQwenResponsesHistory(input);
+  assert.deepEqual(result.input,[user,{role:'assistant',content:[inputText('I will inspect the model.')]},call,output]);
+  assert.deepEqual(input[1],oldAssistant);assert.equal(result.audit.length,1);assert.equal(result.audit[0].from,'output_text');
+  const again=normalizeQwenResponsesHistory(result.input);assert.strictEqual(again.input,result.input);assert.deepEqual(again.audit,[]);
 });
 
 test('persistent storage survives restart, scopes duplicate calls by session, and refuses overwrite',t=>{

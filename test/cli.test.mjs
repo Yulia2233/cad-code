@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {ROOT,PYTHON} from '../src/paths.mjs';
@@ -73,6 +74,38 @@ async function fixture(t){
   return {directory,runtime,workspace,credentials,env,port,ocPort,gatewayPort,events,connection,start,finish,cli:args=>start(path.join(ROOT,'cad-code'),args)};
 }
 
+test('Qwen gateway forwards historical assistant input_text and preserves tool and user content',async t=>{
+  const forwarded=[];
+  const upstream=http.createServer(async(req,res)=>{
+    let raw='';for await(const chunk of req)raw+=chunk;
+    forwarded.push(JSON.parse(raw));
+    res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({id:'resp_mock',output:[]}));
+  });
+  await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>upstream.close(resolve)));
+  const f=await fixture(t);
+  fs.writeFileSync(f.credentials,JSON.stringify({baseURL:`http://127.0.0.1:${upstream.address().port}/v1`,apiKey:'MOCK_ONLY_NOT_A_REAL_CREDENTIAL'}));
+  f.cli(['--credentials',f.credentials,'--web']);
+  await until(()=>f.connection());
+  const config=JSON.parse(fs.readFileSync(path.join(f.runtime,'opencode.json'))),provider=config.provider['cad-local'];
+  const input=[{role:'user',content:[{type:'input_text',text:'继续重建'}]},
+    {role:'assistant',content:[{type:'output_text',text:'正在检查曲面。',annotations:[]}]},
+    {type:'function_call',call_id:'call_mock',name:'exec',arguments:'{"code":"text(1)"}'},
+    {type:'function_call_output',call_id:'call_mock',output:'1'}];
+  const response=await fetch(provider.options.baseURL+'/responses',{method:'POST',
+    headers:{authorization:'Bearer '+provider.options.apiKey,'content-type':'application/json'},
+    body:JSON.stringify({model:'old-provider',input,stream:false})});
+  assert.equal(response.status,200,await response.text());assert.equal(forwarded.length,1);
+  assert.equal(forwarded[0].model,'qwen-v8');assert.equal(forwarded[0].temperature,1);
+  assert.equal(forwarded[0].reasoning.effort,'medium');
+  assert.deepEqual(forwarded[0].input,[input[0],{role:'assistant',content:[{type:'input_text',text:'正在检查曲面。'}]},input[2],input[3]]);
+  const requests=path.join(f.runtime,'model-requests'),entry=fs.readdirSync(requests)[0];
+  const audit=JSON.parse(fs.readFileSync(path.join(requests,entry,'media-alignment.json')));
+  assert.equal(audit.provider_history_normalization.length,1);
+  const original=JSON.parse(fs.readFileSync(path.join(requests,entry,'request.json')));
+  assert.deepEqual(original.body.input,input);
+});
+
 test('CLI --help needs no credential and starts no backend',async t=>{
   const f=await fixture(t),r=await f.finish(f.cli(['--help']));
   assert.equal(r.exit.code,0);assert.match(r.stdout,/OpenCode terminal agent/);assert.match(r.stdout,/--file/);
@@ -99,6 +132,7 @@ test('CLI --file creates/binds one session, uses isolated config and cleans up i
   assert.doesNotMatch(fs.readFileSync(path.join(f.runtime,'opencode.json'),'utf8'),/MOCK_ONLY_NOT_A_REAL_CREDENTIAL/);
   assert.equal(fs.statSync(path.join(f.runtime,'opencode.json')).mode&0o777,0o600);
   assert.deepEqual(fs.readFileSync(path.join(f.workspace,'ses_mock_created_1/input/圆柱.step')),bytes);assert.deepEqual(fs.readFileSync(source),bytes);
+  for(const name of ['stepir.py','cadeval.py','families_common.py'])assert.ok(fs.statSync(path.join(f.workspace,'ses_mock_created_1/tools',name)).isFile());
   const connection=f.connection();assert.ok(connection);await until(()=>!alive(connection.pid));
   const serve=events.find(e=>e.event==='spawn'&&e.mode==='serve');await until(()=>!alive(serve.pid));
 });
@@ -132,7 +166,10 @@ test('CLI --web keeps its owned backend until termination and does not spawn a t
   const connection=await until(()=>f.connection());
   await until(()=>r.stdout.includes('可选网页'));
   assert.equal(r.exit,null);assert.equal(f.events().some(e=>e.event==='spawn'&&['attach','run'].includes(e.mode)),false);
-  const response=await fetch(connection.website+'/api/config');assert.equal(response.status,200);assert.equal((await response.json()).model,'gpt-6.1-sol');
+  const response=await fetch(connection.website+'/api/config');assert.equal(response.status,200);assert.equal((await response.json()).model,'qwen-v8');
+  const created=await fetch(connection.website+'/api/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'Workspace tools'})});
+  assert.equal(created.status,200);const session=await created.json();
+  for(const name of ['stepir.py','cadeval.py','families_common.py','cadthreads.py','robust_iou.py','frozen/compare.py'])assert.ok(fs.statSync(path.join(f.workspace,session.id,'tools',name)).isFile());
   r.child.kill('SIGTERM');const exited=await f.finish(r);assert.equal(exited.exit.code,0);
   await until(()=>!alive(connection.pid));
 });
@@ -144,7 +181,7 @@ test('CLI reuses a healthy backend without stopping it, and run mode selects its
   assert.equal(alive(backend.child.pid),true);
   const response=await fetch(connection.url+'/global/health',{headers:{authorization:'Basic '+Buffer.from('opencode:'+connection.password).toString('base64')}});assert.equal(response.status,200);
   const events=f.events();assert.equal(events.filter(e=>e.event==='spawn'&&e.mode==='serve').length,1);
-  const run=events.find(e=>e.event==='spawn'&&e.mode==='run');assert.ok(run);assert.ok(run.argv.includes('--thinking'));assert.equal(run.argv[run.argv.indexOf('--attach')+1],connection.url);assert.equal(run.argv[run.argv.indexOf('--model')+1],'cad-local/gpt-6.1-sol');
+  const run=events.find(e=>e.event==='spawn'&&e.mode==='run');assert.ok(run);assert.ok(run.argv.includes('--thinking'));assert.equal(run.argv[run.argv.indexOf('--attach')+1],connection.url);assert.equal(run.argv[run.argv.indexOf('--model')+1],'cad-local/qwen-v8');
   assert.equal(events.some(e=>e.event==='terminated'),false);
   backend.child.kill('SIGTERM');await f.finish(backend);
 });

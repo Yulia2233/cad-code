@@ -25,6 +25,36 @@ test('exec sequences dependent commands and retains JavaScript/source newlines',
   assert.equal(events.find(e=>e.kind==='exec_start').code,code);
 });
 
+test('session-local CAD tools export a STEP, read IR and compare geometry inside the sandbox',async()=>{
+  const {id,dir}=fixture('local_cad_tools');
+  const model="from pathlib import Path\nimport simplecadapi as scad\n@scad.part(id='tools_control', revision='1.0.0', project_root=Path(__file__).parent)\ndef build():\n    return scad.make_part_rpart(part_id='tools_control', body=scad.make_cylinder_rsolid(radius=5, height=12))\n";
+  fs.mkdirSync(path.join(dir,'out'));fs.writeFileSync(path.join(dir,'out/model.py'),model);
+  const command=[
+    '"$CAD_CODE_PYTHON" tools/cad.py export out/model.py --out out/reference',
+    '"$CAD_CODE_PYTHON" tools/stepir.py out/reference/model.step --out out/target.ir.jsonl',
+    '"$CAD_CODE_PYTHON" -I tools/cadeval.py eval --code out/model.py --target out/reference/model.step --out out/check-1 --metrics-python "$CAD_CODE_PYTHON"'
+  ].join(' && ');
+  const result=await executeCode(id,`text(await tools.exec_command({cmd:${quoted(command)},yield_time_ms:30000,max_output_tokens:6000}));`);
+  assert.equal(result.error,undefined,result.output);let returned=JSON.parse(result.output),output=returned.output;
+  while(returned.session_id&&returned.exit_code===null){
+    const next=await executeCode(id,`text(await tools.write_stdin({session_id:${returned.session_id},yield_time_ms:1000,max_output_tokens:6000}));`);
+    returned=JSON.parse(next.output);output+=returned.output;
+  }
+  assert.equal(returned.exit_code,0,output);
+  const lines=output.trim().split('\n').filter(s=>s.startsWith('{'));
+  const score=JSON.parse(lines.at(-1));
+  assert.equal(score.build_ok,true);assert.equal(score.export_ok,true);assert.equal(score.robust_ok,true,output);
+  assert.ok(score.riou>.999,output);assert.ok(score.iou>.999,output);
+  const ir=fs.readFileSync(path.join(dir,'out/target.ir.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.ok(ir.length>1);assert.equal(ir[0].types.CYL,1);
+  assert.equal(ir[0].counts.face,3);assert.ok(Math.abs(ir[0].vol-Math.PI*25*12)<.01);
+  // Copies cannot mutate the shipped bundle or another session, and resumes keep edits.
+  const helper=path.join(dir,'tools/families_common.py');fs.writeFileSync(helper,'# session edit\n');
+  const check=await executeCode(id,'text(await tools.exec_command({cmd:"cat tools/families_common.py"}));');
+  assert.equal(JSON.parse(check.output).output,'# session edit\n');
+  assert.notEqual(fs.readFileSync(path.join(ROOT,'tools/families_common.py'),'utf8'),'# session edit\n');
+});
+
 test('Unicode remains intact when a multibyte character crosses stdout chunks',async()=>{
   const {id}=fixture('utf8');
   const command="printf '\\344'; sleep 0.08; printf '\\270\\255'; sleep 0.08; printf '\\360\\237'; sleep 0.08; printf '\\224\\247\\n'";

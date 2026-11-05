@@ -1,6 +1,6 @@
 # CAD Code
 
-基于 **OpenCode** 的本地 CAD Agent，提供终端 CLI 和网页两种交互方式。默认使用 **GPT‑6.1 Sol**、完整 **SimpleCADAPI 2.2.5 skill**，执行真实建模、检查、STEP/STL 导出和渲染。
+基于 **OpenCode** 的本地 CAD Agent，提供终端 CLI 和网页两种交互方式。默认使用 **Qwen v8**（`qwen-v8`）、完整 **SimpleCADAPI 2.2.5 skill**，执行真实建模、检查、STEP/STL 导出和渲染。
 
 ## 现在体验
 
@@ -17,6 +17,8 @@
 
 网页服务启动后，另一个终端运行 `./cad-code` 会连接同一个后端；退出该附加终端不会停止网页。启动服务的终端退出时会清理它管理的后端。CLI 与网页共用会话数据库，产物各自存入 `workspace/<session-id>/`。`--file` 复制输入到本会话 `input/`，不移动原件；单文件上限 32MiB。
 
+每个新工作区自动创建 `tools/`，包含训练轨迹中使用的 `stepir.py`、`cadeval.py`、`families_common.py` 及评估所需配套文件、`cad.py`。它们是随项目分发的独立文件副本；继续会话时补齐缺失文件，保留已有修改。运行时提示词使用当前会话的实际工具路径。首次升级后运行 `npm run setup`，补齐 robust IoU 所需 Python 依赖。调用和来源见 [工作区工具说明](tools/README.md)。
+
 ## 新机器安装
 
 当前支持 **macOS**，需要 Node.js 22+、OpenCode 1.18.27、Python 3.12/3.13 和系统 `sandbox-exec`。
@@ -30,7 +32,7 @@ npm run setup -- --python python3.12
 ./cad-code --credentials /absolute/path/provider.json
 ```
 
-API 文件格式如下，填入你自己的服务信息；也支持 `ccvibe.settings` 包装格式：
+API 文件格式如下；也支持 `ccvibe.settings` 包装格式。当前本机配置使用 `~/.secrets/cad-code-qwen-v8.json`，文件权限为 `0600`，密钥不会写入项目：
 
 ```json
 {"baseURL":"https://your-provider.example/v1","apiKey":"YOUR_API_KEY"}
@@ -56,6 +58,7 @@ image(view.image_url, view.detail);
 | 位置 | 内容 |
 |---|---|
 | `workspace/<session-id>/` | 输入、notebook、验证脚本和 CAD 产物 |
+| `workspace/<session-id>/tools/` | 本会话独立的 STEP IR、评估、坐标辅助和导出工具 |
 | `workspace/<session-id>/.cad-events.jsonl` | 原始 JS、完整命令输出、错误、图像与执行记录 |
 | `.runtime/xdg/data/opencode/` | OpenCode 会话数据库 |
 | `.runtime/model-requests/` | 实际模型请求和完整流式返回，凭据脱敏 |
@@ -66,7 +69,9 @@ image(view.image_url, view.detail);
 
 ## 配置与验证
 
-默认 `temperature=1`、`reasoning_effort=high`、vision、262144 上下文，输出预算 16384。完整验证结果、设计和限制见 [开发与架构报告](docs/implementation-report.md)。
+默认 `temperature=1`、vision、262144 上下文，输出预算 16384。Qwen v8使用受支持的`reasoning_effort=medium`；完整验证结果、设计和限制见 [开发与架构报告](docs/implementation-report.md)。
+
+当前 Qwen Responses 服务的历史助手文本要求 `input_text`；网关会对 OpenCode 的 `output_text` 回放块做兼容转换并记录审计。已恢复续轮工具调用；纯文本进度回复后提前结束仍是已知限制，不代表重建任务已完成。
 
 前两段提示词来自 [英文系统模板](docs/system-prompt.en.md) 和 [运行时模板](docs/runtime-prompt.md) 的英文块，由 plugin 每次请求编译。模型、日期、会话工作目录、Python/skill/工具路径、输入文件和评审父路径动态填充；不会把模板占位符、中文对照或文档说明发送给模型，也不重复追加旧 OpenCode 环境信息。渲染结果及模板 SHA‑256 保存在 `.runtime/prompt-snapshots/`，CLI 和网页使用同一套编译逻辑。
 
@@ -74,7 +79,7 @@ image(view.image_url, view.detail);
 npm test
 ```
 
-支持通过 `CAD_CODE_MODEL`、`CAD_CODE_PYTHON`、`CAD_CODE_SKILL`、`OPENCODE_BIN` 覆盖默认组件；`CAD_CODE_WIRE_API=responses` 为默认，也可显式改为 `chat`。不同供应商是否真的支持工具图片必须实测：本次GPT‑6.1接口的Chat工具图片被忽略，Responses已通过实际读图验证；程序不会自动降级、删图或改成用户图片。更换模型/协议需重启后端。默认端口：网页8772、OpenCode18134、模型网关18135，均绑定本机。
+支持通过 `CAD_CODE_MODEL`、`CAD_CODE_PYTHON`、`CAD_CODE_SKILL`、`OPENCODE_BIN` 覆盖默认组件；`CAD_CODE_WIRE_API=responses` 为默认，也可显式改为 `chat`。当前 Qwen v8 使用 `http://47.100.23.120/v1`、模型 `qwen-v8` 和 Responses 原生工具调用，默认 `temperature=1`、reasoning effort=`medium`、上下文262144、vision开启。Responses里的图片若未声明detail，会补`high`元数据并记审计，不修改原图。更换模型/协议需重启后端。默认端口：网页8772、OpenCode18134、模型网关18135，均绑定本机。
 
 本项目是受限兼容原型：CAD 子进程使用非交互 stdin，尚不支持 PTY；执行隔离依赖 macOS Seatbelt，Node `vm` 本身不是安全边界。详细能力边界见报告。
 

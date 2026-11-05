@@ -1,10 +1,18 @@
 # CAD Code 开发与架构报告
 
-日期：2026-11-02；初始版本：0.1.0。
+日期：2026-11-05；初始版本：0.1.0。
+
+> 当前默认模型与服务说明：2026-11-05起为公网 Qwen v8，`qwen-v8`，Responses API，temperature=1，context=262144，vision已启用。密钥仅保存在用户本机`~/.secrets/cad-code-qwen-v8.json`（0600）；此前GPT-6.1实验记录保留为历史证据，不代表当前默认provider。
+
+续轮兼容已修复：OpenCode 回放历史助手文本使用 `output_text`，当前 Qwen Responses 服务要求 `input_text`。网关仅转换历史助手文本块，保留文本内容、角色、消息顺序以及 reasoning、工具调用与工具结果，原请求和转换位置另存审计。这解释了该 case 的 239 项校验错误；修复后续轮能调用工具。但该 case 仍曾在纯文本进度回复后再次停止，重建尚未完成，不能将协议修复等同于 agent 完整任务成功。
+
+本次上传验证：92项Node测试全部通过，包括真实本地网关转发回归，核对原始历史记录不改、上游助手文本类型转换、工具调用/结果及用户文本保真、Qwen推理参数与转换审计。Python工具AST解析及来源SHA检查通过；未把当前case当成重建成功。
+
+Qwen v8 使用 `reasoning.effort=medium`（服务支持 `low/medium/xhigh`；`high` 会返回 HTTP 400），网关与 OpenCode plugin 两层都按当前模型选择该值；其它原有 GPT 模型仍用 `high`。未声明detail的 Responses 工具图像仅补 `detail=high` 元数据，保留原图URL/字节并记入 `media-alignment.json`；显式 `low/high/auto` 保持原值。公网实测模型列表/文本/Responses强制function-call/图片均成功，图像读取返回颜色正确。OpenCode实际会话实测 `exec` 调用并返回 `CAD_CODE_QWEN_TOOL_OK`；API请求为model=`qwen-v8`、temperature=1、reasoning effort=medium。全量90项Node测试通过。详细原始结果保存在本机 `.runtime/qwen-v8-open-code-smoke.json`、`.runtime/qwen-v8-exec-smoke.json`、`.runtime/qwen-v8-full-test-final.log`；这些运行文件不进入git。
 
 ## 交付结果
 
-在独立项目目录实现了 **OpenCode 终端 CLI + 网页交互**，接入用户指定的 `gpt-6.1-sol`，使用完整 SimpleCADAPI2.2.5 skill。实际执行器支持千问/兼容 API 的标准 `tool_calls`，在 `exec(code)` 内运行 Codex 风格 JavaScript 编排。
+在独立项目目录实现了 **OpenCode 终端 CLI + 网页交互**，当前默认接入 Qwen v8（`qwen-v8`，`http://47.100.23.120/v1`），使用完整 SimpleCADAPI2.2.5 skill。实际执行器支持Responses原生function_call，在 `exec(code)` 内运行Codex风格JavaScript编排。
 
 已实际跑通：CLI 启动与对话 → 读取文档 → 编写可编辑 notebook → 构建几何 → 导出 SCADPKG/STEP/STL → STEP 重读验证 → PNG 渲染 → 独立模型子评审 → 最终交付。没有启动新训练，也没有修改已有训练/评测服务。
 
@@ -160,3 +168,10 @@ worker保存有序 `input_text/input_image`，插件取得真实OpenCode `sessio
 网页结果示例：
 
 ![网页中的真实圆柱、完整会话和交付产物](images/web-demo.png)
+
+
+## 2026-11-05：每会话工具目录
+
+工作区初始化统一收口到 `src/workspace.mjs`：网页创建/访问、CLI文件导入、原生OpenCode `session.created`事件、prompt hook与执行器均复用同一入口。新目录自动复制 `tools/{stepir.py,cadeval.py,families_common.py}`，以及cadeval的cadthreads/robust_iou/frozen比较依赖和原有cad.py；来源与hash随项目固定，不依赖父仓库。继续会话只补缺失文件，保留既有修改；目录/文件软链接拒绝。提示词的TOOLS_DIR指向当前会话内目录。
+
+完整87项测试通过；实际macOS沙盒内控制模型完成STEP导出、IR提取、strict与robust IoU=1验证，SDK为2.2.5。运行中的空闲本地后端已重启，网页创建与原生OpenCode创建两个真实空会话均实测自动落盘工具，不发送模型请求。工作区副本可写，仅供交互诊断，正式benchmark仍用外置可信评分器。历史2.1.4评测与本地2.2.5诊断口径分开。

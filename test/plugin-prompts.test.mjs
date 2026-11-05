@@ -41,6 +41,29 @@ test('main plugin hook replaces marker and automatic OpenCode tails with exactly
   `);
 });
 
+test('Qwen v8 uses a supported reasoning effort while every model keeps temperature one',async t=>{
+  await scenario(t,`
+    const hooks=await CADCodePlugin({client:{}}),qwen={},gpt={};
+    await hooks['chat.params']({model:{id:'qwen-v8'}},qwen);
+    await hooks['chat.params']({model:{id:'gpt-6.1-sol'}},gpt);
+    assert.equal(qwen.temperature,1);assert.equal(qwen.options.reasoningEffort,'medium');
+    assert.equal(gpt.temperature,1);assert.equal(gpt.options.reasoningEffort,'high');
+    await hooks.dispose();
+  `);
+});
+
+test('native CLI session creation prepares tools before any prompt or execution',async t=>{
+  await scenario(t,`
+    const hooks=await CADCodePlugin({client:{}}),id='ses_hook_created';
+    await hooks.event({event:{type:'session.created',properties:{info:{id}}}});
+    for(const name of ['cadeval.py','stepir.py','families_common.py'])assert.ok(fs.statSync(path.join(sessionDir(id),'tools',name)).isFile());
+    const file=path.join(sessionDir(id),'tools/families_common.py');fs.writeFileSync(file,'# user change\\n');
+    await hooks.event({event:{type:'session.created',properties:{info:{id}}}});
+    assert.equal(fs.readFileSync(file,'utf8'),'# user change\\n');
+    await hooks.dispose();
+  `);
+});
+
 test('unmarked compaction/system prompts keep the exact array and content without session side effects',async t=>{
   await scenario(t,`
     const hooks=await CADCodePlugin({client:{session:{get:async()=>{throw Error('unexpected lookup');}}}}),system=['Summarize this conversation for compaction.','Keep all original constraints.'];

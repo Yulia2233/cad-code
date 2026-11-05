@@ -64,7 +64,7 @@ export function compileSessionPrompts({sessionID,model,parentID,agent='cad-code'
   if(!providerID||!modelID||!(model.api?.id||modelID))throw Error('PromptTemplateError: missing actual model identity');
   const templates=loadPromptTemplates(templateDir),inputs=path.join(cwd,'input');
   const names=fs.existsSync(inputs)?fs.readdirSync(inputs,{withFileTypes:true}).filter(x=>x.isFile()).map(x=>x.name).sort():[];
-  const values={MODEL_NAME:model.api?.id||modelID,MODEL_ID:`${providerID}/${modelID}`,WORKING_DIRECTORY:cwd,WORKSPACE_ROOT:cwd,IS_GIT_REPO:fs.existsSync(path.join(cwd,'.git'))?'yes':'no',PLATFORM:process.platform,CURRENT_DATE:dateText(now),SESSION_WORKSPACE:cwd,PYTHON:python,SKILL_DIR:skill,TOOLS_DIR:path.join(root,'tools'),INPUT_FILE_LIST:names.map(name=>JSON.stringify('input/'+name)).join(', '),PARENT_OUT:agent==='cad-review'?path.join(checkedSession(parentID,workspace),'out'):''};
+  const values={MODEL_NAME:model.api?.id||modelID,MODEL_ID:`${providerID}/${modelID}`,WORKING_DIRECTORY:cwd,WORKSPACE_ROOT:cwd,IS_GIT_REPO:fs.existsSync(path.join(cwd,'.git'))?'yes':'no',PLATFORM:process.platform,CURRENT_DATE:dateText(now),SESSION_WORKSPACE:cwd,PYTHON:python,SKILL_DIR:skill,TOOLS_DIR:path.join(cwd,'tools'),INPUT_FILE_LIST:names.map(name=>JSON.stringify('input/'+name)).join(', '),PARENT_OUT:agent==='cad-review'?path.join(checkedSession(parentID,workspace),'out'):''};
   const additions=[];
   if(names.length)additions.push(renderTemplate(templates.inputFiles,values));
   if(agent==='cad-review'){

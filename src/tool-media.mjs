@@ -102,3 +102,50 @@ export function restoreResponsesToolMedia(input,options={}){
   const indexes=new Set(checked.audit.map(x=>x.messageIndex));
   return {input:input.map((item,i)=>indexes.has(i)?{...item,output:checked.messages[i].content.map(p=>p.type==='text'?{type:'input_text',text:p.text}:{type:'input_image',image_url:p.image_url.url,...(p.image_url.detail?{detail:p.image_url.detail}:{})})}:item),audit:checked.audit.map(x=>({...x,mode:'responses_function_call_output_original'}))};
 }
+
+// vLLM's Qwen3.5 Responses frontend requires image detail explicitly. This
+// provider-specific adapter adds metadata only; it preserves the original URL
+// and bytes and records every location changed for request auditing.
+export function defaultResponsesImageDetail(input,{detail='high'}={}){
+  if(!Array.isArray(input))return {input,audit:[]};
+  const audit=[];
+  function visit(value,location){
+    if(Array.isArray(value)){
+      let changed=false;const items=value.map((item,index)=>{const result=visit(item,`${location}[${index}]`);changed||=result.value!==item;return result.value;});
+      return {value:changed?items:value,changed};
+    }
+    if(!value||typeof value!=='object')return {value,changed:false};
+    if(value.type==='input_image'&&typeof value.image_url==='string'&&value.detail==null){
+      audit.push({location,detail,sha256:mediaHash(Buffer.from(value.image_url.split(',')[1]||'','base64'))});
+      return {value:{...value,detail},changed:true};
+    }
+    let changed=false;const result={...value};
+    for(const [key,item] of Object.entries(value)){
+      if(!Array.isArray(item)&&(!item||typeof item!=='object'))continue;
+      const child=visit(item,`${location}.${key}`);if(child.value!==item){result[key]=child.value;changed=true;}
+    }
+    return {value:changed?result:value,changed};
+  }
+  const normalized=visit(input,'input');
+  return {input:normalized.value,audit};
+}
+
+// OpenCode replays assistant text as Responses output_text parts when it sends
+// the full transcript again. vLLM's Qwen Responses schema accepts input_text in
+// prior messages, so normalize only historical assistant message content.
+export function normalizeQwenResponsesHistory(input){
+  if(!Array.isArray(input))return {input,audit:[]};
+  const audit=[];let changed=false;
+  const output=input.map((item,inputIndex)=>{
+    if(item?.role!=='assistant'||!Array.isArray(item.content))return item;
+    let itemChanged=false;
+    const content=item.content.map((part,contentIndex)=>{
+      if(part?.type!=='output_text')return part;
+      itemChanged=changed=true;
+      audit.push({input_index:inputIndex,content_index:contentIndex,from:'output_text',to:'input_text',text_sha256:mediaHash(part.text||'')});
+      return {type:'input_text',text:part.text||''};
+    });
+    return itemChanged?{...item,content}:item;
+  });
+  return {input:changed?output:input,audit};
+}

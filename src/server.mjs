@@ -5,12 +5,13 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {ROOT,RUNTIME,WORKSPACE,PYTHON,SKILL,sessionDir,inside} from './paths.mjs';
 import {sseDecoder,secretRedactor} from './streams.mjs';
-import {restoreToolMedia,restoreResponsesToolMedia,loadToolMedia} from './tool-media.mjs';
+import {restoreToolMedia,restoreResponsesToolMedia,defaultResponsesImageDetail,normalizeQwenResponsesHistory,loadToolMedia} from './tool-media.mjs';
 import {MAIN_PROMPT_MARKER,REVIEW_PROMPT_MARKER,loadPromptTemplates} from './prompts.mjs';
+import {prepareSessionWorkspace} from './workspace.mjs';
 // Validate source documents before opening listeners or starting a model runner.
 loadPromptTemplates();
 const port=Number(process.env.PORT||8772),ocPort=Number(process.env.CAD_CODE_OPENCODE_PORT||18134),gatewayPort=Number(process.env.CAD_CODE_GATEWAY_PORT||18135);
-const model=process.env.CAD_CODE_MODEL||'gpt-6.1-sol';
+const model=process.env.CAD_CODE_MODEL||'qwen-v8';
 const wireAPI=process.env.CAD_CODE_WIRE_API||'responses';
 if(!['responses','chat'].includes(wireAPI))throw Error('CAD_CODE_WIRE_API must be responses or chat');
 const maxForwardedBytes=Number(process.env.CAD_CODE_MAX_MODEL_REQUEST_BYTES||64*1024*1024);
@@ -49,19 +50,25 @@ const gateway=http.createServer(async(req,res)=>{
     if(!['/chat/completions','/responses','/models'].includes(route))return json(res,{error:'Unknown model route'},404);
     const requestID=Date.now()+'-'+crypto.randomBytes(4).toString('hex');
     const logDir=path.join(RUNTIME,'model-requests',requestID);fs.mkdirSync(logDir,{recursive:true});
-    let payload,rawPayload,mediaAudit=[];if(req.method==='POST'){
+    let payload,rawPayload,mediaAudit=[],providerImageDefaults=[],providerHistoryNormalization=[];if(req.method==='POST'){
       payload=JSON.parse(await body(req));rawPayload=structuredClone(payload);payload.temperature=1;payload.model=model;
       fs.writeFileSync(path.join(logDir,'request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,sessionID:req.headers['x-cad-session-id']||null,body:rawPayload},null,2)));
       payload.store=false;
       try{
         if(route==='/responses'){
-          payload.reasoning={...payload.reasoning,effort:'high'};
+          payload.reasoning={...payload.reasoning,effort:model==='qwen-v8'?'medium':'high'};
           const restored=restoreResponsesToolMedia(payload.input,{sessionID:req.headers['x-cad-session-id']});payload.input=restored.input;mediaAudit=restored.audit;
+          if(model==='qwen-v8'){
+            const history=normalizeQwenResponsesHistory(payload.input);
+            payload.input=history.input;providerHistoryNormalization=history.audit;
+            const normalized=defaultResponsesImageDetail(payload.input,{detail:'high'});
+            payload.input=normalized.input;providerImageDefaults=normalized.audit;
+          }
         }else{payload.reasoning_effort='high';const restored=restoreToolMedia(payload.messages,{sessionID:req.headers['x-cad-session-id']});payload.messages=restored.messages;mediaAudit=restored.audit;}
       }catch(e){fs.writeFileSync(path.join(logDir,'media-alignment-error.json'),JSON.stringify({error:e.message}));return json(res,{error:{type:'ToolMediaAlignmentError',message:e.message}},400);}
     }
     fs.writeFileSync(path.join(logDir,'forwarded-request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,sessionID:req.headers['x-cad-session-id']||null,body:payload},null,2)));
-    fs.writeFileSync(path.join(logDir,'media-alignment.json'),JSON.stringify({mode:'tool_multimodal_original',restored:mediaAudit},null,2));
+    fs.writeFileSync(path.join(logDir,'media-alignment.json'),JSON.stringify({mode:'tool_multimodal_original',restored:mediaAudit,provider_history_normalization:providerHistoryNormalization,provider_image_defaults:providerImageDefaults},null,2));
     const forwardedBody=payload?JSON.stringify(payload):null;
     if(forwardedBody&&Buffer.byteLength(forwardedBody)>maxForwardedBytes){const error={type:'ToolMediaPayloadTooLarge',message:'The full model request exceeds the configured byte limit; no images or history were dropped or resized.',bytes:Buffer.byteLength(forwardedBody),limit:maxForwardedBytes};fs.writeFileSync(path.join(logDir,'response-error.json'),JSON.stringify(error));return json(res,{error},413);}
     const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
@@ -80,7 +87,7 @@ const opencodeConfig={
   $schema:'https://opencode.ai/config.json',model:'cad-local/'+model,small_model:'cad-local/'+model,default_agent:'cad-code',
   plugin:[new URL('file://'+path.join(ROOT,'src/plugin.mjs')).href],instructions:[],
   enabled_providers:['cad-local'],compaction:{auto:true,prune:false,reserved:1024},
-  provider:{'cad-local':{name:'CAD Code · GPT6.1',npm:wireAPI==='responses'?'@ai-sdk/openai':'@ai-sdk/openai-compatible',options:{baseURL:`http://127.0.0.1:${gatewayPort}/v1`,apiKey:gatewayToken},models:{[model]:{name:'GPT‑6.1 Sol',tool_call:true,reasoning:true,attachment:true,modalities:{input:['text','image'],output:['text']},limit:{context:262144,input:262144,output:16384}}}}},
+  provider:{'cad-local':{name:'CAD Code · '+model,npm:wireAPI==='responses'?'@ai-sdk/openai':'@ai-sdk/openai-compatible',options:{baseURL:`http://127.0.0.1:${gatewayPort}/v1`,apiKey:gatewayToken},models:{[model]:{name:model,tool_call:true,reasoning:true,attachment:true,modalities:{input:['text','image'],output:['text']},limit:{context:262144,input:262144,output:16384}}}}},
   agent:{'cad-code':{description:'使用 SimpleCADAPI 完成建模、检查、导出和渲染',mode:'primary',model:'cad-local/'+model,temperature:1,prompt:MAIN_PROMPT_MARKER,tools:{'*':false,exec:true,question:true,todowrite:true,task:true},permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}},'cad-review':{description:'独立检查父任务 out/ 下的真实渲染与验证结果，父产物只读。',mode:'subagent',model:'cad-local/'+model,temperature:1,prompt:REVIEW_PROMPT_MARKER,tools:{'*':false,exec:true},permission:{'*':'deny',exec:'allow'}},compaction:{model:'cad-local/'+model,temperature:1}},
   permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}
 };
@@ -115,11 +122,11 @@ app=http.createServer(async(req,res)=>{
     const url=new URL(req.url,`http://127.0.0.1:${port}`),route=url.pathname;
     if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,wireAPI,toolImageMode:'tool_multimodal_original',skill:'SimpleCADAPI 2.2.5',python:PYTHON});
     if(route==='/api/sessions'){
-      if(req.method==='POST'){const a=await readJSON(req),s=await oc('/session','POST',{title:a.title||'新的 CAD 任务'});const work=sessionDir(s.id);fs.mkdirSync(work,{recursive:true});return json(res,s);}
+      if(req.method==='POST'){const a=await readJSON(req),s=await oc('/session','POST',{title:a.title||'新的 CAD 任务'});prepareSessionWorkspace(s.id);return json(res,s);}
       return json(res,await oc('/session'));
     }
     const m=route.match(/^\/api\/sessions\/(ses_[\w-]+)(?:\/(.*))?$/);
-    if(m){const [,id,action]=m,work=sessionDir(id);fs.mkdirSync(work,{recursive:true});
+    if(m){const [,id,action]=m,work=prepareSessionWorkspace(id);
       if(!action){const [messages,status]=await Promise.all([oc(`/session/${id}/message`),oc('/session/status')]);const state={id,messages,status:status[id]||{type:'idle'},files:files(work)};fs.writeFileSync(path.join(work,'.conversation.json'),JSON.stringify(state));return json(res,state);}
       if(action==='send'&&req.method==='POST'){const a=await readJSON(req);if(!a.text?.trim())throw Error('Message is empty');await oc(`/session/${id}/prompt_async`,'POST',{agent:'cad-code',model:{providerID:'cad-local',modelID:model},parts:[{type:'text',text:a.text}]});return json(res,{ok:true});}
       if(action==='stop'&&req.method==='POST'){const dir=path.join(RUNTIME,'cancel');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,id),String(Date.now()));await oc(`/session/${id}/abort`,'POST',{});return json(res,{ok:true});}

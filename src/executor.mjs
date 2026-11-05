@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawn,spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import readline from 'node:readline';
 import {ROOT,REPO,RUNTIME,PYTHON,SKILL,sessionDir} from './paths.mjs';
+import {prepareSessionWorkspace} from './workspace.mjs';
+export {prepareSessionWorkspace} from './workspace.mjs';
 const workers=new Map();
 const quote=s=>JSON.stringify(s);
 export function sandboxProfile(work,readOnlyRoots=[]) {
@@ -11,11 +13,6 @@ export function sandboxProfile(work,readOnlyRoots=[]) {
   const envInfo=path.join(RUNTIME,'python-environment.json');let libraryRoots=[];try{libraryRoots=JSON.parse(fs.readFileSync(envInfo)).library_roots||[];}catch{}
   const read=['/System','/Library','/usr','/bin','/sbin','/dev','/opt/homebrew','/private/etc','/private/var/db',path.dirname(nodePath),path.join(ROOT,'src'),path.join(ROOT,'tools'),pythonRoot,...(fs.existsSync(pythonRoot)?[fs.realpathSync(pythonRoot)]:[]),path.join(REPO,'envs/cad226'),SKILL,work,...libraryRoots,...readOnlyRoots];
   return `(version 1)\n(deny default)\n(allow process-fork)\n(allow process-exec)\n(allow signal (target self) (target children))\n(allow sysctl-read)\n(allow mach-lookup)\n(allow file-read-metadata)\n(allow file-read* (literal "/") ${read.map(x=>'(subpath '+quote(x)+')').join(' ')})\n(allow file-write* (subpath ${quote(work)}) (literal "/dev/null") (literal "/dev/tty"))\n`;
-}
-export function prepareSessionWorkspace(sessionID){
-  const work=sessionDir(sessionID);fs.mkdirSync(work,{recursive:true});
-  if(!fs.existsSync(path.join(work,'.git'))){const git=spawnSync('git',['init','--quiet'],{cwd:work});if(git.status!==0)throw Error('Could not initialize session Git workspace');if(!fs.existsSync(path.join(work,'.gitignore')))fs.writeFileSync(path.join(work,'.gitignore'),'.tmp/\n.home/\n.cad-events.jsonl\n.conversation.json\n__marimo__/\n__pycache__/\nout/\n');}
-  return work;
 }
 function worker(sessionID,readOnlyRoots=[]) {
   if(workers.has(sessionID))return workers.get(sessionID);

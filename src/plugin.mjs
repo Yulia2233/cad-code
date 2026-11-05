@@ -11,6 +11,9 @@ export default async function CADCodePlugin({client}) {
     return r.data.parentID;
   }
   return {
+    event:async({event})=>{
+      if(event.type==='session.created')prepareSessionWorkspace(event.properties.info.id);
+    },
     tool:{exec:tool({
       description:'Execute JavaScript orchestration in this CAD task workspace. Write code using await tools.exec_command({cmd:"..."}), text(result.output), tools.apply_patch("*** Begin Patch..."), tools.write_stdin({session_id,...}), image(await tools.view_image({path:"out/model.png"})). ALL_TOOLS lists the actual subtools. Keep dependent actions sequential. Print observations with text(). This is executable JavaScript, not a shell-command array.',
       args:{code:tool.schema.string().describe('Complete JavaScript source, with original newlines.')},
@@ -31,7 +34,11 @@ export default async function CADCodePlugin({client}) {
         if(r.error)throw Error(r.output);return {output:r.output};
       }
     })},
-    'chat.params':async(_,out)=>{out.temperature=1;out.options={...out.options,reasoningEffort:'high'};},
+    'chat.params':async(input,out)=>{
+      out.temperature=1;
+      const modelID=input?.model?.id||input?.model?.api?.id;
+      out.options={...out.options,reasoningEffort:modelID==='qwen-v8'?'medium':'high'};
+    },
     'chat.headers':async(input,out)=>{out.headers['x-cad-session-id']=input.sessionID;},
     'experimental.chat.system.transform':async(input,out)=>{
       // Only our explicit agent markers opt in. Internal compaction prompts and
