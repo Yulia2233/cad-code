@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {ROOT,WORKSPACE,sessionDir} from './paths.mjs';
+import {assertSessionAvailable} from './session-guard.mjs';
 
 // Fixed bundle, shipped with cad-code; no dependency on the parent research repo.
 const TOOL_FILES=['stepir.py','cadeval.py','families_common.py','cadthreads.py','robust_iou.py','frozen/compare.py','cad.py'];
@@ -11,6 +12,7 @@ function directory(p){
   if(stat.isSymbolicLink()||!stat.isDirectory())throw Error('Workspace directory must not be a symlink or non-directory: '+p);
 }
 export function prepareSessionWorkspace(sessionID){
+  assertSessionAvailable(sessionID);
   const work=sessionDir(sessionID);
   fs.mkdirSync(path.dirname(WORKSPACE),{recursive:true});
   directory(WORKSPACE);directory(work);

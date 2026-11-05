@@ -3,6 +3,8 @@ import {executeCode,stopWorkers,prepareSessionWorkspace} from './executor.mjs';
 import {sessionDir} from './paths.mjs';
 import {saveToolMedia,mediaHash,mediaReceipt} from './tool-media.mjs';
 import {compileSessionPrompts,savePromptSnapshot,promptRole} from './prompts.mjs';
+import {assertSessionAvailable,sessionRevision} from './session-guard.mjs';
+import {selectedModel,qwenModel,selectedThinking} from './provider-config.mjs';
 export default async function CADCodePlugin({client}) {
   async function reviewParent(sessionID,agent){
     if(agent!=='cad-review')return undefined;
@@ -12,7 +14,7 @@ export default async function CADCodePlugin({client}) {
   }
   return {
     event:async({event})=>{
-      if(event.type==='session.created')prepareSessionWorkspace(event.properties.info.id);
+      if(event.type==='session.created'){const id=event.properties.info.id;if(sessionRevision(id)>0)return;try{prepareSessionWorkspace(id);}catch(e){if(!['SessionDeleted','SessionMaintenance'].includes(e.code))throw e;}}
     },
     tool:{exec:tool({
       description:'Execute JavaScript orchestration in this CAD task workspace. Write code using await tools.exec_command({cmd:"..."}), text(result.output), tools.apply_patch("*** Begin Patch..."), tools.write_stdin({session_id,...}), image(await tools.view_image({path:"out/model.png"})). ALL_TOOLS lists the actual subtools. Keep dependent actions sequential. Print observations with text(). This is executable JavaScript, not a shell-command array.',
@@ -36,8 +38,8 @@ export default async function CADCodePlugin({client}) {
     })},
     'chat.params':async(input,out)=>{
       out.temperature=1;
-      const modelID=input?.model?.id||input?.model?.api?.id;
-      out.options={...out.options,reasoningEffort:modelID==='qwen-v8'?'medium':'high'};
+      const modelID=selectedModel(input?.model?.api?.id||input?.model?.id);
+      out.options={...out.options,reasoningEffort:qwenModel(modelID)?(selectedThinking()?'medium':'low'):(selectedThinking()?'high':'none')};
     },
     'chat.headers':async(input,out)=>{out.headers['x-cad-session-id']=input.sessionID;},
     'experimental.chat.system.transform':async(input,out)=>{
@@ -45,9 +47,13 @@ export default async function CADCodePlugin({client}) {
       // unrelated agents keep their original instructions.
       const agent=promptRole(out.system);if(!agent)return;
       if(!input.sessionID)throw Error('PromptTemplateError: session context missing');
+      const revision=sessionRevision(input.sessionID);
       prepareSessionWorkspace(input.sessionID);
       const parentID=await reviewParent(input.sessionID,agent);
-      const compiled=compileSessionPrompts({sessionID:input.sessionID,model:input.model,parentID,agent});
+      assertSessionAvailable(input.sessionID,{revision});
+      const actualID=selectedModel(null);
+      const actualModel=actualID&&input.model?{...input.model,id:actualID,api:{...input.model.api,id:actualID}}:input.model;
+      const compiled=compileSessionPrompts({sessionID:input.sessionID,model:actualModel,parentID,agent});
       savePromptSnapshot(compiled);
       out.system.splice(0,out.system.length,compiled.system,compiled.runtime);
     },

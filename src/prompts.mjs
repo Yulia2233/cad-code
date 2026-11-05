@@ -1,3 +1,4 @@
+import {assertSessionAvailable} from './session-guard.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -74,6 +75,7 @@ export function compileSessionPrompts({sessionID,model,parentID,agent='cad-code'
   return {system:renderTemplate(templates.system,values),runtime:[renderTemplate(templates.base,values),...additions].join('\n\n'),values,templateHashes:templates.templateHashes,agent,sessionID,snapshotRoot:path.join(runtime,'prompt-snapshots')};
 }
 export function savePromptSnapshot(compiled){
+  assertSessionAvailable(compiled.sessionID,{runtime:path.dirname(compiled.snapshotRoot)});
   const directory=path.join(compiled.snapshotRoot,compiled.sessionID);fs.mkdirSync(directory,{recursive:true,mode:0o700});
   const file=path.join(directory,Date.now()+'-'+crypto.randomUUID()+'.json');
   fs.writeFileSync(file,JSON.stringify({createdAt:new Date().toISOString(),sessionID:compiled.sessionID,agent:compiled.agent,templateHashes:compiled.templateHashes,values:compiled.values,segments:[compiled.system,compiled.runtime]},null,2),{mode:0o600});

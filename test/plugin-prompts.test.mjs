@@ -52,6 +52,23 @@ test('Qwen v8 uses a supported reasoning effort while every model keeps temperat
   `);
 });
 
+test('live selection controls prompt identity and reasoning without changing the OpenCode routing alias',async t=>{
+  await scenario(t,`
+    fs.mkdirSync(RUNTIME,{recursive:true});
+    const selection=path.join(RUNTIME,'active-model.json');
+    fs.writeFileSync(selection,JSON.stringify({model:'Qwen/custom-27B'}));
+    const hooks=await CADCodePlugin({client:{}}),params={};
+    await hooks['chat.params']({model},params);assert.equal(params.options.reasoningEffort,'medium');
+    fs.writeFileSync(selection,JSON.stringify({model:'Qwen/custom-27B',thinking:false}));
+    await hooks['chat.params']({model},params);assert.equal(params.options.reasoningEffort,'low');
+    const system=[MAIN_PROMPT_MARKER];await hooks['experimental.chat.system.transform']({sessionID:'ses_live_model',model},{system});
+    assert.ok(system[0].includes('Qwen/custom-27B'));assert.equal(system[0].includes('served-gpt-test'),false);
+    fs.writeFileSync(selection,JSON.stringify({model:'gpt-6.1-sol'}));
+    await hooks['chat.params']({model},params);assert.equal(params.options.reasoningEffort,'high');
+    assert.equal(model.api.id,'served-gpt-test');await hooks.dispose();
+  `);
+});
+
 test('native CLI session creation prepares tools before any prompt or execution',async t=>{
   await scenario(t,`
     const hooks=await CADCodePlugin({client:{}}),id='ses_hook_created';
@@ -60,6 +77,21 @@ test('native CLI session creation prepares tools before any prompt or execution'
     const file=path.join(sessionDir(id),'tools/families_common.py');fs.writeFileSync(file,'# user change\\n');
     await hooks.event({event:{type:'session.created',properties:{info:{id}}}});
     assert.equal(fs.readFileSync(file,'utf8'),'# user change\\n');
+    await hooks.dispose();
+  `);
+});
+
+test('deleted and maintained sessions reject late workspace, prompt snapshot and executor recreation',async t=>{
+  await scenario(t,`
+    const hooks=await CADCodePlugin({client:{}}),id='ses_deleted_hook';
+    fs.mkdirSync(RUNTIME,{recursive:true});fs.writeFileSync(path.join(RUNTIME,'deleted-sessions.json'),JSON.stringify([id]));
+    await hooks.event({event:{type:'session.created',properties:{info:{id}}}});
+    await assert.rejects(hooks['experimental.chat.system.transform']({sessionID:id,model},{system:[MAIN_PROMPT_MARKER]}),/deleted/);
+    const executor=await import(${JSON.stringify(new URL('../src/executor.mjs',import.meta.url).href)});
+    await assert.rejects(executor.executeCode(id,'text(1)'),/deleted/);
+    assert.equal(fs.existsSync(sessionDir(id)),false);assert.equal(fs.existsSync(path.join(RUNTIME,'prompt-snapshots',id)),false);
+    const locked='ses_locked_hook';fs.mkdirSync(path.join(RUNTIME,'session-maintenance'));fs.writeFileSync(path.join(RUNTIME,'session-maintenance',locked),'locked');
+    await hooks.event({event:{type:'session.created',properties:{info:{id:locked}}}});assert.equal(fs.existsSync(sessionDir(locked)),false);
     await hooks.dispose();
   `);
 });

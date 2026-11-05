@@ -9,7 +9,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="CAD Code 首页"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m16 3 12 7v13l-12 7L4 23V10Z M4 10l12 7 12-7 M16 17v13 M10 6l12 7v7"/></svg><span>CAD<span class="brand-light"> Code</span></span><span class="local-tag">LOCAL</span></a>
-    <div class="top-meta"><span id="modelName">连接模型…</span><span class="divider"></span><span id="skillName">SimpleCADAPI</span><span id="connection" class="connection"><i></i>连接中</span></div>
+    <div class="top-meta"><button id="dataSettings" class="settings-button" type="button">数据管理</button><button id="apiSettings" class="settings-button" type="button">API 配置</button><span id="modelName">连接模型…</span><span class="divider"></span><span id="skillName">SimpleCADAPI</span><span id="connection" class="connection"><i></i>连接中</span></div>
   </header>
 
   <div class="workspace">
@@ -57,6 +57,30 @@
       <div class="artifacts-note">点击查看代码或图片，点击 ↓ 下载文件。<br>工具结果和会话正文完整保留。</div>
     </aside>
   </div>
+  <dialog id="providerDialog" class="provider-dialog" aria-labelledby="providerTitle">
+    <form id="providerForm" autocomplete="off">
+      <div class="provider-heading"><h2 id="providerTitle">API 配置</h2><button id="closeProvider" type="button" aria-label="关闭 API 配置">×</button></div>
+      <p>配置模型服务地址和密钥。保存后，下一次模型请求使用新配置；当前请求继续运行。</p>
+      <label for="providerURL">Base URL</label>
+      <input id="providerURL" name="base_url" type="url" placeholder="https://your-provider.example/v1" required spellcheck="false" autocomplete="off">
+      <label for="providerKey">API key</label>
+      <input id="providerKey" name="api_key" type="password" placeholder="输入 API key" spellcheck="false" autocomplete="new-password">
+      <small id="providerKeyHint">密钥仅保存在本机，不会显示在配置响应中。</small>
+      <div class="model-label"><label for="providerModel">模型 ID</label><button id="loadProviderModels" type="button">获取模型列表</button></div>
+      <input id="providerModel" name="model" list="providerModelList" required spellcheck="false" autocomplete="off" placeholder="选择或填写服务中的模型 ID">
+      <datalist id="providerModelList"></datalist>
+      <small>可从列表选择，也可直接填写。当前使用 Responses API，服务需支持工具调用。</small>
+      <label class="thinking-toggle"><input id="providerThinking" name="thinking" type="checkbox" checked><span>开启思考<small>接口返回的思考显示为可折叠卡片，终端也会显示。</small></span></label>
+      <p id="providerNotice" role="status" aria-live="polite"></p>
+      <div class="provider-actions"><button id="cancelProvider" type="button">取消</button><button id="saveProvider" type="submit">保存配置</button></div>
+    </form>
+  </dialog>
+  <dialog id="dataDialog" class="provider-dialog data-dialog" aria-labelledby="dataTitle">
+    <div class="provider-heading"><h2 id="dataTitle">数据管理</h2><button id="closeData" type="button" aria-label="关闭数据管理">×</button></div>
+    <p>工作区文件与对话/轨迹独立管理。清理文件会保留轨迹；删除对话会保留文件。运行中的任务请先停止。</p>
+    <p id="dataNotice" role="status" aria-live="polite"></p>
+    <div id="dataItems" class="data-items"></div>
+  </dialog>
   <script src="/app.js" defer></script>
 </body>
 </html>

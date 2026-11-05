@@ -5,13 +5,17 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {ROOT,RUNTIME,WORKSPACE,PYTHON,SKILL,sessionDir,inside} from './paths.mjs';
 import {sseDecoder,secretRedactor} from './streams.mjs';
+import {qwenReasoningStream} from './reasoning-stream.mjs';
 import {restoreToolMedia,restoreResponsesToolMedia,defaultResponsesImageDetail,normalizeQwenResponsesHistory,loadToolMedia} from './tool-media.mjs';
 import {MAIN_PROMPT_MARKER,REVIEW_PROMPT_MARKER,loadPromptTemplates} from './prompts.mjs';
 import {prepareSessionWorkspace} from './workspace.mjs';
+import {sessionRevision} from './session-guard.mjs';
+import {workspaceInventory,clearWorkspace,deleteTrajectoryFiles,belongsToSessions} from './session-data.mjs';
+import {loadProviderFile,providerSummary,savedProviderFile,saveProvider,validateProvider,listProviderModels,qwenModel} from './provider-config.mjs';
 // Validate source documents before opening listeners or starting a model runner.
 loadPromptTemplates();
 const port=Number(process.env.PORT||8772),ocPort=Number(process.env.CAD_CODE_OPENCODE_PORT||18134),gatewayPort=Number(process.env.CAD_CODE_GATEWAY_PORT||18135);
-const model=process.env.CAD_CODE_MODEL||'qwen-v8';
+let model=process.env.CAD_CODE_MODEL||'qwen-v8';
 const wireAPI=process.env.CAD_CODE_WIRE_API||'responses';
 if(!['responses','chat'].includes(wireAPI))throw Error('CAD_CODE_WIRE_API must be responses or chat');
 const maxForwardedBytes=Number(process.env.CAD_CODE_MAX_MODEL_REQUEST_BYTES||64*1024*1024);
@@ -20,16 +24,27 @@ const args=process.argv.slice(2),credentialArg=args.indexOf('--credentials');
 const webEnabled=args.includes('--web');
 fs.mkdirSync(RUNTIME,{recursive:true});fs.mkdirSync(WORKSPACE,{recursive:true});
 const connectionFile=path.join(RUNTIME,'connection.json');
-const saved=fs.existsSync(connectionFile)?JSON.parse(fs.readFileSync(connectionFile)):{};
-const credentialFile=credentialArg>=0?path.resolve(args[credentialArg+1]):process.env.CAD_CODE_CREDENTIALS||saved.credentialFile;
-if(!credentialFile)throw Error('Provide --credentials /path/to/provider.json on the first start');
-fs.writeFileSync(connectionFile,JSON.stringify({credentialFile,model},null,2),{mode:0o600});
-let configText=fs.readFileSync(credentialFile,'utf8').trim().replace(/,$/,'');
-let provider;try{provider=JSON.parse(configText);}catch{provider=JSON.parse('{'+configText+'}');}
-provider=provider.ccvibe||provider;const settings=provider.settings||provider.options||provider;
-const upstream=settings.baseURL||settings.base_url,key=settings.apiKey||settings.api_key;
-if(!upstream||!key)throw Error('Credential file must contain baseURL and apiKey');
-const clean=value=>String(value).split(key).join('[REDACTED]');
+const credentialFile=credentialArg>=0?path.resolve(args[credentialArg+1]):process.env.CAD_CODE_CREDENTIALS||savedProviderFile();
+if(!credentialFile&&!webEnabled)throw Error('Configure API with cad-code config, or start cad-code --web');
+let activeProvider=credentialFile?loadProviderFile(credentialFile):null;
+model=process.env.CAD_CODE_MODEL||activeProvider?.model||model;
+if(activeProvider)activeProvider={...activeProvider,model};
+const routingModel=model;
+function recordModel(){const file=path.join(RUNTIME,'active-model.json'),temp=file+'.'+crypto.randomBytes(8).toString('hex')+'.tmp';fs.writeFileSync(temp,JSON.stringify({model,thinking:activeProvider?.thinking??true})+'\n',{mode:0o600,flag:'wx'});fs.renameSync(temp,file);}
+recordModel();
+if(credentialFile)fs.writeFileSync(connectionFile,JSON.stringify({credentialFile,model},null,2),{mode:0o600});
+const knownSecrets=new Set(activeProvider?[activeProvider.apiKey]:[]);
+const clean=value=>{let text=String(value);for(const secret of knownSecrets)text=text.split(secret).join('[REDACTED]');return text;};
+const configToken=crypto.randomBytes(32).toString('hex');
+const deletedFile=path.join(RUNTIME,'deleted-sessions.json');
+const deletedSessions=new Set(fs.existsSync(deletedFile)?JSON.parse(fs.readFileSync(deletedFile)):[]);
+const maintenance=new Set();
+const generations=new Map();
+function currentGeneration(id){return generations.has(id)?generations.get(id):sessionRevision(id);}
+function sessionChanged(id,generation){return deletedSessions.has(id)?{error:'Conversation was deleted',status:404}:maintenance.has(id)||currentGeneration(id)!==generation?{error:'Session data changed; retry the request',status:409}:null;}
+function lockFile(id){return path.join(RUNTIME,'session-maintenance',id);}
+function writeDeleted(){const temp=deletedFile+'.tmp';fs.writeFileSync(temp,JSON.stringify([...deletedSessions]),{mode:0o600});fs.renameSync(temp,deletedFile);}
+
 const json=(res,body,status=200)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(body));};
 async function body(req,max=32*1024*1024){let size=0,out=[];for await(const b of req){size+=b.length;if(size>max)throw Error('Request too large');out.push(b);}return Buffer.concat(out);}
 async function readJSON(req){const b=await body(req);return b.length?JSON.parse(b):{};}
@@ -46,25 +61,31 @@ async function oc(route,method='GET',data){
 const gateway=http.createServer(async(req,res)=>{
   try{
     if(req.headers.authorization!=='Bearer '+gatewayToken)return json(res,{error:'Unauthorized'},401);
+    const session=req.headers['x-cad-session-id'];
+    if(deletedSessions.has(session))return json(res,{error:'Conversation was deleted'},404);
+    if(maintenance.has(session))return json(res,{error:'Session data is being changed'},409);
+    const provider=activeProvider;if(!provider)return json(res,{error:{type:'ProviderNotConfigured',message:'Configure Base URL and API key in API settings or cad-code config.'}},503);
+    const {baseURL:upstream,apiKey:key,model:requestModel,thinking}=provider;
     const route=new URL(req.url,'http://localhost').pathname.replace(/^\/v1/,'');
     if(!['/chat/completions','/responses','/models'].includes(route))return json(res,{error:'Unknown model route'},404);
     const requestID=Date.now()+'-'+crypto.randomBytes(4).toString('hex');
     const logDir=path.join(RUNTIME,'model-requests',requestID);fs.mkdirSync(logDir,{recursive:true});
     let payload,rawPayload,mediaAudit=[],providerImageDefaults=[],providerHistoryNormalization=[];if(req.method==='POST'){
-      payload=JSON.parse(await body(req));rawPayload=structuredClone(payload);payload.temperature=1;payload.model=model;
+      payload=JSON.parse(await body(req));rawPayload=structuredClone(payload);payload.temperature=1;payload.model=requestModel;
       fs.writeFileSync(path.join(logDir,'request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,sessionID:req.headers['x-cad-session-id']||null,body:rawPayload},null,2)));
       payload.store=false;
       try{
         if(route==='/responses'){
-          payload.reasoning={...payload.reasoning,effort:model==='qwen-v8'?'medium':'high'};
+          payload.reasoning={...payload.reasoning,effort:qwenModel(requestModel)?(thinking?'medium':'low'):(thinking?'high':'none')};
+          if(qwenModel(requestModel))payload.chat_template_kwargs={...payload.chat_template_kwargs,enable_thinking:thinking};
           const restored=restoreResponsesToolMedia(payload.input,{sessionID:req.headers['x-cad-session-id']});payload.input=restored.input;mediaAudit=restored.audit;
-          if(model==='qwen-v8'){
+          if(qwenModel(requestModel)){
             const history=normalizeQwenResponsesHistory(payload.input);
             payload.input=history.input;providerHistoryNormalization=history.audit;
             const normalized=defaultResponsesImageDetail(payload.input,{detail:'high'});
             payload.input=normalized.input;providerImageDefaults=normalized.audit;
           }
-        }else{payload.reasoning_effort='high';const restored=restoreToolMedia(payload.messages,{sessionID:req.headers['x-cad-session-id']});payload.messages=restored.messages;mediaAudit=restored.audit;}
+        }else{payload.reasoning_effort=qwenModel(requestModel)?(thinking?'medium':'low'):(thinking?'high':'none');if(qwenModel(requestModel))payload.chat_template_kwargs={...payload.chat_template_kwargs,enable_thinking:thinking};const restored=restoreToolMedia(payload.messages,{sessionID:req.headers['x-cad-session-id']});payload.messages=restored.messages;mediaAudit=restored.audit;}
       }catch(e){fs.writeFileSync(path.join(logDir,'media-alignment-error.json'),JSON.stringify({error:e.message}));return json(res,{error:{type:'ToolMediaAlignmentError',message:e.message}},400);}
     }
     fs.writeFileSync(path.join(logDir,'forwarded-request.json'),clean(JSON.stringify({time:new Date().toISOString(),route,sessionID:req.headers['x-cad-session-id']||null,body:payload},null,2)));
@@ -77,7 +98,12 @@ const gateway=http.createServer(async(req,res)=>{
     res.writeHead(upstreamResponse.status,{'content-type':upstreamResponse.headers.get('content-type')||'application/json','cache-control':'no-cache','x-accel-buffering':'no'});
     const log=fs.createWriteStream(path.join(logDir,'response.'+(payload?.stream?'sse':'json')));
     const redactor=secretRedactor(key,b=>log.write(b));
-    try{for await(const chunk of upstreamResponse.body){redactor.write(Buffer.from(chunk));res.write(chunk);}}finally{redactor.end();log.end();res.end();}
+    const streamAudit=[];
+    const clientLog=payload?.stream&&qwenModel(requestModel)&&route==='/responses'?fs.createWriteStream(path.join(logDir,'client-response.sse')):null;
+    const clientRedactor=clientLog?secretRedactor(key,b=>clientLog.write(b)):null;
+    const adapter=clientLog?qwenReasoningStream(chunk=>{clientRedactor.write(chunk);res.write(chunk);},entry=>streamAudit.push(entry)):null;
+    try{for await(const chunk of upstreamResponse.body){redactor.write(Buffer.from(chunk));if(adapter)adapter.write(Buffer.from(chunk));else res.write(chunk);}}
+    finally{adapter?.end();clientRedactor?.end();clientLog?.end();redactor.end();log.end();if(adapter)fs.writeFileSync(path.join(logDir,'reasoning-stream-adaptation.json'),JSON.stringify({mode:'full_reasoning_text_protocol_adaptation',text_rewritten:false,events:streamAudit},null,2));res.end();}
   }catch(e){if(!res.headersSent)json(res,{error:clean(e.message)},502);else res.end();}
 });
 await new Promise((resolve,reject)=>gateway.listen(gatewayPort,'127.0.0.1',resolve).on('error',reject));
@@ -104,35 +130,89 @@ let ready=false;
 for(let i=0;i<90;i++){try{await oc('/global/health');ready=true;break;}catch{await new Promise(r=>setTimeout(r,500));}}
 if(!ready){ocProcess.kill();gateway.close();throw Error('OpenCode did not become ready; see .runtime/opencode.log');}
 fs.writeFileSync(path.join(RUNTIME,'status.json'),JSON.stringify({model,python:PYTHON,skill:SKILL,opencode:ocBase,website:`http://127.0.0.1:${port}`,pid:process.pid,startedAt:new Date().toISOString()},null,2));
-fs.writeFileSync(path.join(RUNTIME,'cli-connection.json'),JSON.stringify({pid:process.pid,url:ocBase,password:ocPassword,model,website:webEnabled?`http://127.0.0.1:${port}`:null}),{mode:0o600});
 // Full OpenCode event archive; the DB and snapshots survive refresh/restart.
 async function archiveEvents(){
   while(!shuttingDown){try{
     const r=await fetch(ocBase+'/event',{headers:{authorization:auth}});
-    const decoder=sseDecoder(data=>{try{const e=JSON.parse(data);fs.appendFileSync(path.join(RUNTIME,'events.jsonl'),clean(JSON.stringify({time:new Date().toISOString(),event:e}))+'\n');}catch{}});
+    const decoder=sseDecoder(data=>{try{const e=JSON.parse(data);if(belongsToSessions(e,deletedSessions))return;fs.appendFileSync(path.join(RUNTIME,'events.jsonl'),clean(JSON.stringify({time:new Date().toISOString(),event:e}))+'\n');}catch{}});
     for await(const b of r.body)decoder.write(Buffer.from(b));decoder.end();
   }catch{}if(!shuttingDown)await new Promise(r=>setTimeout(r,1000));}
 }
 archiveEvents();
+async function stopSessionExecution(id){
+  const workersDir=path.join(RUNTIME,'workers'),workerFile=path.join(workersDir,id+'.json');
+  if(!fs.existsSync(workerFile))return;
+  const worker=JSON.parse(fs.readFileSync(workerFile));
+  if(worker.sessionID!==id||!Number.isSafeInteger(worker.pid))throw Error('Invalid execution worker metadata');
+  const cancel=path.join(RUNTIME,'cancel',id);fs.mkdirSync(path.dirname(cancel),{recursive:true});fs.writeFileSync(cancel,String(Date.now()));
+  const deadline=Date.now()+3000;
+  while(Date.now()<deadline){
+    try{process.kill(worker.pid,0);}catch(e){if(e.code==='ESRCH')return;throw e;}
+    await new Promise(resolve=>setTimeout(resolve,30));
+  }
+  throw Error('Execution worker has not stopped; data was not deleted. Retry after stopping the task.');
+}
 const mime=p=>({'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.svg':'image/svg+xml','.json':'application/json','.stl':'model/stl','.step':'application/step','.stp':'application/step','.py':'text/plain; charset=utf-8','.md':'text/plain; charset=utf-8'})[path.extname(p).toLowerCase()]||'application/octet-stream';
 function files(work){let out=[];if(!fs.existsSync(work))return out;function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){if(f.name.startsWith('.')||f.name==='__marimo__'||f.name==='__pycache__'||f.isSymbolicLink())continue;const p=path.join(dir,f.name);if(f.isDirectory())walk(p);else{const stat=fs.statSync(p);out.push({path:path.relative(work,p),size:stat.size,mtime:stat.mtimeMs});}}}walk(work);return out.sort((a,b)=>b.mtime-a.mtime);}
 app=http.createServer(async(req,res)=>{
   try{
+    if(![`127.0.0.1:${port}`,`localhost:${port}`].includes(req.headers.host)||req.headers['sec-fetch-site']==='cross-site')return json(res,{error:'Host refused'},403);
     const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${port}`&&origin!==`http://localhost:${port}`)return json(res,{error:'Origin refused'},403);
     const url=new URL(req.url,`http://127.0.0.1:${port}`),route=url.pathname;
-    if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,wireAPI,toolImageMode:'tool_multimodal_original',skill:'SimpleCADAPI 2.2.5',python:PYTHON});
+    if(route==='/api/provider/models'){
+      if(req.method!=='POST')return json(res,{error:'Method not allowed'},405);
+      if(req.headers['x-cad-config-token']!==configToken)return json(res,{error:'Configuration token required'},403);
+      if(!req.headers['content-type']?.startsWith('application/json'))return json(res,{error:'JSON required'},415);
+      const draft=JSON.parse((await body(req,16384)).toString('utf8'));
+      const provider=validateProvider(draft,{previous:activeProvider});
+      return json(res,{models:await listProviderModels(provider)});
+    }
+    if(route==='/api/provider'){
+      if(req.method==='GET')return json(res,{...providerSummary(activeProvider),config_token:configToken});
+      if(req.method!=='PUT')return json(res,{error:'Method not allowed'},405);
+      if(req.headers['x-cad-config-token']!==configToken)return json(res,{error:'Configuration token required'},403);
+      if(!req.headers['content-type']?.startsWith('application/json'))return json(res,{error:'JSON required'},415);
+      const update=JSON.parse((await body(req,16384)).toString('utf8'));
+      const next=validateProvider(update,{previous:activeProvider});
+      knownSecrets.add(next.apiKey);saveProvider(next);activeProvider=next;model=next.model;recordModel();
+      const link=path.join(RUNTIME,'cli-connection.json');const connection=JSON.parse(fs.readFileSync(link));connection.model=model;connection.thinking=next.thinking;fs.writeFileSync(link,JSON.stringify(connection),{mode:0o600});
+      const statusFile=path.join(RUNTIME,'status.json');const status=JSON.parse(fs.readFileSync(statusFile));status.model=model;fs.writeFileSync(statusFile,JSON.stringify(status,null,2));
+      return json(res,{...providerSummary(activeProvider),effective:'next_request'});
+    }
+    if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,wireAPI,toolImageMode:'tool_multimodal_original',skill:'SimpleCADAPI 2.2.5',python:PYTHON,providerConfigured:Boolean(activeProvider),thinking:activeProvider?.thinking??true});
+    if(route==='/api/data'&&req.method==='GET'){const sessions=await oc('/session');return json(res,{items:workspaceInventory(sessions),config_token:configToken});}
     if(route==='/api/sessions'){
       if(req.method==='POST'){const a=await readJSON(req),s=await oc('/session','POST',{title:a.title||'新的 CAD 任务'});prepareSessionWorkspace(s.id);return json(res,s);}
       return json(res,await oc('/session'));
     }
     const m=route.match(/^\/api\/sessions\/(ses_[\w-]+)(?:\/(.*))?$/);
-    if(m){const [,id,action]=m,work=prepareSessionWorkspace(id);
-      if(!action){const [messages,status]=await Promise.all([oc(`/session/${id}/message`),oc('/session/status')]);const state={id,messages,status:status[id]||{type:'idle'},files:files(work)};fs.writeFileSync(path.join(work,'.conversation.json'),JSON.stringify(state));return json(res,state);}
-      if(action==='send'&&req.method==='POST'){const a=await readJSON(req);if(!a.text?.trim())throw Error('Message is empty');await oc(`/session/${id}/prompt_async`,'POST',{agent:'cad-code',model:{providerID:'cad-local',modelID:model},parts:[{type:'text',text:a.text}]});return json(res,{ok:true});}
+    if(m){const [,id,action]=m,work=sessionDir(id),generation=currentGeneration(id);
+      if(['workspace','conversation'].includes(action)&&req.method==='DELETE'){
+        if(req.headers['x-cad-config-token']!==configToken)return json(res,{error:'Configuration token required'},403);
+        const confirmed=await readJSON(req);if(confirmed.confirm!==id)return json(res,{error:'Confirm the exact session ID'},400);
+        const sessions=await oc('/session');const ids=new Set([id]);let changed=true;
+        while(changed){changed=false;for(const s of sessions)if(s.parentID&&ids.has(s.parentID)&&!ids.has(s.id)){ids.add(s.id);changed=true;}}
+        if(action==='conversation'&&!sessions.some(s=>s.id===id))return json(res,{error:'Conversation not found'},404);
+        const states=await oc('/session/status');if([...ids].some(x=>states[x]&&states[x].type!=='idle'))return json(res,{error:'Stop this task and its reviews before deleting data'},409);
+        if([...ids].some(x=>maintenance.has(x)))return json(res,{error:'Session data is already being changed'},409);
+        for(const x of ids){generations.set(x,currentGeneration(x)+1);const revisionFile=path.join(RUNTIME,'session-generations',x);fs.mkdirSync(path.dirname(revisionFile),{recursive:true});fs.writeFileSync(revisionFile,String(generations.get(x)));maintenance.add(x);fs.mkdirSync(path.dirname(lockFile(x)),{recursive:true});fs.writeFileSync(lockFile(x),'locked');}
+        try{
+          for(const x of ids)await stopSessionExecution(x);
+          if(action==='workspace')return json(res,{ok:true,scope:'workspace',...clearWorkspace(id)});
+          for(const x of ids)deletedSessions.add(x);
+          try{await oc('/session/'+id,'DELETE');}catch(e){for(const x of ids)deletedSessions.delete(x);throw e;}
+          writeDeleted();const result=deleteTrajectoryFiles([...ids]);
+          return json(res,{ok:true,scope:'conversation',deleted_sessions:[...ids],...result});
+        }finally{for(const x of ids){maintenance.delete(x);fs.rmSync(lockFile(x),{force:true});}}
+      }
+      if(deletedSessions.has(id)&&!['file','workspace'].includes(action))return json(res,{error:'Conversation was deleted'},404);
+      if(!action){const [messages,status]=await Promise.all([oc(`/session/${id}/message`),oc('/session/status')]);const invalid=sessionChanged(id,generation);if(invalid)return json(res,{error:invalid.error},invalid.status);const state={id,messages,status:status[id]||{type:'idle'},files:files(work)};if(fs.existsSync(work))fs.writeFileSync(path.join(work,'.conversation.json'),JSON.stringify(state));return json(res,state);}
+      if(action==='send'&&req.method==='POST'){const a=await readJSON(req);const invalid=sessionChanged(id,generation);if(invalid)return json(res,{error:invalid.error},invalid.status);prepareSessionWorkspace(id);if(!a.text?.trim())throw Error('Message is empty');await oc(`/session/${id}/prompt_async`,'POST',{agent:'cad-code',model:{providerID:'cad-local',modelID:routingModel},parts:[{type:'text',text:a.text}]});return json(res,{ok:true});}
       if(action==='stop'&&req.method==='POST'){const dir=path.join(RUNTIME,'cancel');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,id),String(Date.now()));await oc(`/session/${id}/abort`,'POST',{});return json(res,{ok:true});}
       if(action==='upload'&&req.method==='POST'){
+        const bytes=await body(req);const invalid=sessionChanged(id,generation);if(invalid)return json(res,{error:invalid.error},invalid.status);prepareSessionWorkspace(id);
         const name=path.basename(url.searchParams.get('name')||'');if(!/^[\w.\-\u4e00-\u9fff ]{1,150}$/.test(name))throw Error('Invalid filename');
-        const p=inside(work,'input/'+name);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,await body(req));return json(res,{path:'input/'+name});
+        const p=inside(work,'input/'+name);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);return json(res,{path:'input/'+name});
       }
       if(action==='file'){
         const p=inside(work,url.searchParams.get('path')||'');if(!fs.statSync(p).isFile())throw Error('Not a file');
@@ -164,4 +244,5 @@ app=http.createServer(async(req,res)=>{
   }catch(e){json(res,{error:clean(e.message)},400);}
 });
 if(webEnabled)await new Promise((resolve,reject)=>app.listen(port,'127.0.0.1',resolve).on('error',reject));
+fs.writeFileSync(path.join(RUNTIME,'cli-connection.json'),JSON.stringify({pid:process.pid,url:ocBase,password:ocPassword,configToken,model,routingModel,thinking:activeProvider?.thinking??true,website:webEnabled?`http://127.0.0.1:${port}`:null}),{mode:0o600});
 console.log(`CAD Code CLI backend ready: ${ocBase} · ${model} · SimpleCADAPI2.2.5${webEnabled?' · web http://127.0.0.1:'+port:''}`);

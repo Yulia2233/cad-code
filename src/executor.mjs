@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import readline from 'node:readline';
 import {ROOT,REPO,RUNTIME,PYTHON,SKILL,sessionDir} from './paths.mjs';
 import {prepareSessionWorkspace} from './workspace.mjs';
+import {assertSessionAvailable} from './session-guard.mjs';
 export {prepareSessionWorkspace} from './workspace.mjs';
 const workers=new Map();
 const quote=s=>JSON.stringify(s);
@@ -16,10 +17,12 @@ export function sandboxProfile(work,readOnlyRoots=[]) {
 }
 function worker(sessionID,readOnlyRoots=[]) {
   if(workers.has(sessionID))return workers.get(sessionID);
+  assertSessionAvailable(sessionID);
   const work=prepareSessionWorkspace(sessionID);
   for(const d of ['.tmp','.home'])fs.mkdirSync(path.join(work,d),{recursive:true});
   const env={PATH:path.dirname(PYTHON)+':/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',HOME:path.join(work,'.home'),TMPDIR:path.join(work,'.tmp'),LANG:'en_US.UTF-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',OMP_NUM_THREADS:'2',MPLCONFIGDIR:path.join(work,'.tmp/mpl'),SIMPLECAD_VTK_RENDER_LOCK:path.join(work,'.tmp/vtk-render.lock'),CAD_CODE_WORK:work,CAD_CODE_READONLY:JSON.stringify(readOnlyRoots),CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL};
   const child=spawn('/usr/bin/sandbox-exec',['-p',sandboxProfile(work,readOnlyRoots),process.env.CAD_CODE_NODE||process.execPath,path.join(ROOT,'src/worker.mjs')],{cwd:work,env,stdio:['pipe','pipe','pipe']});
+  const workerFile=path.join(RUNTIME,'workers',sessionID+'.json');fs.mkdirSync(path.dirname(workerFile),{recursive:true});fs.writeFileSync(workerFile,JSON.stringify({sessionID,pid:child.pid}),{mode:0o600});
   const w={child,pending:new Map(),seq:0,stderr:''};workers.set(sessionID,w);
   child.stderr.on('data',b=>{w.stderr+=b;});
   readline.createInterface({input:child.stdout}).on('line',line=>{
@@ -29,11 +32,12 @@ function worker(sessionID,readOnlyRoots=[]) {
   });
   const fail=e=>{if(workers.get(sessionID)===w)workers.delete(sessionID);for(const p of w.pending.values()){clearTimeout(p.timer);p.reject(e);}w.pending.clear();};
   child.stdin.on('error',fail);
-  child.on('error',fail);child.on('close',(code,signal)=>fail(Error(`CAD execution worker stopped (${code??signal}): `+w.stderr.slice(-1500))));
+  child.on('error',fail);child.on('close',(code,signal)=>{try{if(JSON.parse(fs.readFileSync(workerFile)).pid===child.pid)fs.unlinkSync(workerFile);}catch{}fail(Error(`CAD execution worker stopped (${code??signal}): `+w.stderr.slice(-1500)));});
   return w;
 }
 export async function executeCode(sessionID,code,signal,readOnlyRoots=[]) {
   if(typeof code!=='string'||!code.trim())throw Error('exec requires nonempty code');
+  assertSessionAvailable(sessionID);
   const w=worker(sessionID,readOnlyRoots),id=++w.seq;
   return await new Promise((resolve,reject)=>{
     const abort=()=>{w.child.stdin.end();reject(Error('Execution cancelled'));};
