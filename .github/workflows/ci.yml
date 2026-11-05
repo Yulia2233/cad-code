@@ -16,6 +16,13 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CAD runtime
+        run: |
+          npm install --global opencode-ai@1.18.27 --no-audit --no-fund
+          npm run setup -- --python python3
       - run: npm test
       - name: Package source
         run: tar --exclude=.git --exclude=node_modules --exclude=.runtime --exclude=workspace -czf "$RUNNER_TEMP/cad-code-source.tar.gz" .
