@@ -99,7 +99,7 @@ candidate and compares it with the target, and prints one JSON line:
 | `run` | `"ok"`, or `{"stage","error","line","cell"}`: `cell` is the feature slug that raised |
 | `solids` | solids in the product (must be 1) |
 | `riou` | volumetric IoU with the target (1.0 = identical) |
-| `faces`, `complete` | face counts and surface types of target and candidate; `complete` = they agree |
+| `faces`, `complete` | face counts and surface types of target and candidate, counted as in the IR header (pieces of one surface merged, so how the target's exporter split faces does not matter); `complete` = they agree. `faces_raw` = plain B-rep counts, for reference only |
 | `vol_err`, `bbox_err` | relative volume error; largest bounding-box difference (mm) |
 | `missing` | regions the target has and the candidate lacks: `vol`, `centroid`, `bbox` |
 | `extra` | regions the candidate has and the target lacks |
@@ -112,7 +112,7 @@ candidate and compares it with the target, and prints one JSON line:
 | `run.cell` = a feature | fix that cell; read the error text, and the API page if the error is about arguments |
 | `stage` capture, `brep_invalid` | a profile crosses itself: check arc direction (`s=-1` swaps start/end), loop order, the plane's `y = n × x` |
 | `solids` > 1 | a feature does not touch the body: check its plane origin and extrusion direction |
-| `complete` false, `riou` high | a blend group or small detail is missing: compare `faces.types_*` with the IR (`TORUS`/`SPHERE` = fillet corners, `CYLINDER` = fillets and bores) and add the missing operation. Every `fillet`/`chamfer` line must be applied, however small |
+| `complete` false, `riou` high | a blend group or small detail is missing: compare `faces.types_*` (IR type names, the same as the IR header) with the IR (`TORUS`/`SPHERE` = fillet corners, `CYL` = fillets and bores) and add the missing operation. Every `fillet`/`chamfer` line must be applied, however small |
 | `missing` / `extra` regions | find the IR records whose coordinates fall in the region's `bbox`, fix that feature (`query face <id>` only for those ids) |
 | `QL selector expected exactly k ..., got m` | the selector's windows are wrong, or the body before the blend is not yet right (evaluate it without the blend cell). Recompute the windows from the IR records of the `between` faces; never lower `k` to what matched |
 | any error | read only the JSON line. Ignore `.simplecad/diagnostics/*.png` (renders the SDK writes on a failed selection); do not open them |

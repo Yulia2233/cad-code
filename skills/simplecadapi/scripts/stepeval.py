@@ -11,7 +11,9 @@ Prints ONE JSON line (the full report is also written to <out>/eval.json):
   riou          volumetric IoU of the two solids (mesh boolean), 1.0 = identical
   vol_err       |V_candidate - V_target| / V_target
   bbox_err      max abs difference of the bounding boxes, mm
-  faces         face counts and surface-type counts of target and candidate
+  faces         face counts and surface-type counts of target and candidate, counted the STEPIR way (stepir.py --base:
+                pieces of one surface merged, B-splines that are analytic recognised), so how an exporter split
+                faces does not matter; faces_raw has the plain B-rep counts for reference
   complete      face count within 10 % (or 2) of the target's and every surface type at >= 80 % of its count:
                 a missing fillet/chamfer group or detail shows up here even when riou is already high
   missing       up to 5 regions that the TARGET has and the candidate lacks: {"vol", "centroid", "bbox"}
@@ -180,6 +182,16 @@ def run_notebook_fresh(nb, out, timeout):
 
 
 # --------------------------------------------------------------------------------------------------------- compare
+def ir_header(step, timeout=900):
+    """Face count and surface-type histogram of a STEP after STEPIR normalisation (same directory's stepir.py, --base)."""
+    r = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve().parent / "stepir.py"), str(step), "--base"],
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0 or not r.stdout.strip():
+        raise RuntimeError((r.stderr or "stepir produced no output").strip().splitlines()[-1][:200])
+    head = json.loads(r.stdout.splitlines()[0])
+    return head["counts"]["face"], head.get("types", {})
+
+
 def sdk_solid(path):
     from simplecadapi.inspect import brep
     from simplecadapi._glue.bridge import from_occt
@@ -229,9 +241,14 @@ def compare(target, cand):
     va, vb, inter = a.volume(), b.volume(), (a ^ b).volume()
     bt, bc = st["bounding_box"], sc["bounding_box"]
     bbox_err = max(abs(bt[k][i] - bc[k][i]) for k in ("min", "max") for i in range(3)) if "min" in bt else None
-    faces = {"target": st["face_count"], "candidate": sc["face_count"],
-             "types_target": st.get("surface_type_statistics"), "types_candidate": sc.get("surface_type_statistics")}
-    return {"faces": faces, "riou": round(inter / (va + vb - inter), 5) if va + vb - inter > 0 else 0.0,
+    raw = {"target": st["face_count"], "candidate": sc["face_count"],
+           "types_target": st.get("surface_type_statistics"), "types_candidate": sc.get("surface_type_statistics")}
+    try:
+        (ft, yt), (fc, yc) = ir_header(target), ir_header(cand)
+        faces = {"target": ft, "candidate": fc, "types_target": yt, "types_candidate": yc, "counted": "stepir"}
+    except Exception as e:  # noqa: BLE001 - fall back to the plain B-rep counts, and say so
+        faces = {**raw, "counted": "brep", "stepir_error": f"{type(e).__name__}: {str(e)[:200]}"}
+    return {"faces": faces, "faces_raw": raw, "riou": round(inter / (va + vb - inter), 5) if va + vb - inter > 0 else 0.0,
             "vol_err": round(abs(vb - va) / max(va, 1e-12), 5),
             "bbox_err": round(bbox_err, 4) if bbox_err is not None else None,
             "missing": regions(a - b, centre), "extra": regions(b - a, centre)}

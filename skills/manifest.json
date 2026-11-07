@@ -438,8 +438,8 @@
     "references/workflows/engineering-drawing.md": "fa5fa3f79f2c7ea16d3da9cd5ba85ff9b296d6d7e6a95532eb1a9cd02a4da17a",
     "references/workflows/export-and-translation.md": "736fd38d3c7f649f54bf9e9f50aba0acf6d3be5d4e598bba4ceac35f1dc64255",
     "references/workflows/single-part-modeling.md": "260f7ed43d25c36ff04635c6e2e4792d6b51093dd968097a54de0f9a09908d5c",
-    "references/workflows/step-reconstruction.md": "0ece827dab2e64af717a45dd72d559da04d7a3d44f2f91bd3e1b9e2bb4daad59",
-    "scripts/stepeval.py": "1f964f6906d51cab87c6dadc2c95715a0b4bc7059b5a11c9b2e2a35a68731fc9",
+    "references/workflows/step-reconstruction.md": "b590fee75194f7c688dc3580a0f620dca4fc3226f1da747a24b7f2bf1dcada96",
+    "scripts/stepeval.py": "c095b604f4e14cc2961da42d1fae1abd87cfbf6d16b6e09127d725b034f50bdf",
     "scripts/stepir.py": "2a923b5fda94a974c3cfb229f18477ddef62880dbb8fe41076a54cb56fb26d59"
   }
 }
