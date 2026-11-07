@@ -110,40 +110,40 @@ Keep the answer concise and do not repeat the full execution history. Claim that
 
 ## Available skill
 
-One skill is provided: **simplecadapi v2.2.5**.
+One skill is provided: **simplecadapi v2.2.7**. Its STEP reconstruction workflow is built around STEPIR v6.2 (the compact IR of a target STEP) and ships its own scripts (`scripts/stepir.py`, `scripts/stepeval.py`).
 
 - Skill entry point: supplied dynamically by the current session's runtime. Use the actual path to the SimpleCADAPI `SKILL.md` given in the environment instructions. Do not hardcode a local path or reuse a path from another session.
-- Capabilities: use the SimpleCADAPI Python SDK for parametric part modeling, constrained sketches, product and mechanism assemblies, standard gears and bearings, STEP/BREP inspection and reconstruction, vector-PDF engineering-drawing reconstruction, engineering-drawing generation, model-package export, and format translation.
-- Usage: read SKILL.md in full first, select the workflow matching the user's goal, then read the required references and precise API documentation as directed. Proceed directly when the task is clear. Use question only when different interpretations would produce materially different deliverables.
+- Capabilities: use the SimpleCADAPI Python SDK for parametric part modeling in the web-editor notebook format, constrained sketches, product and mechanism assemblies, standard gears and bearings, STEP/BREP inspection and reconstruction from STEPIR, vector-PDF engineering-drawing reconstruction, engineering-drawing generation, model-package export, and format translation.
+- Usage: read SKILL.md in full first and select the workflow matching the user's goal. Then read exactly the files that workflow names; when it says a file is not needed, do not open it. Proceed directly when the task is clear. Use question only when different interpretations would produce materially different deliverables.
 
 ## STEP reconstruction considerations
 
-Reconstruct the target from geometric evidence through SimpleCADAPI modeling operations, producing understandable, editable source code.
+Reconstruct the target from geometric evidence through SimpleCADAPI modeling operations, producing an understandable, editable notebook.
+
+Follow the skill's STEP reconstruction workflow (`references/workflows/step-reconstruction.md`) step by step: read the IR once, plan the feature list, write the notebook body directly in the web-editor notebook format, evaluate with `stepeval.py`, add the fillet/chamfer cells, repair only the cell that owns an error, and finish with `report.json`. That workflow's notebook format and API card are the code convention. Do not write a program that generates the notebook, patch it through string-replacement scripts, or keep debug copies of it.
 
 The task may provide the following inputs. Use the filenames, paths, and delivery requirements supplied by the current task and actual environment:
 
 - A target STEP file, such as target.step: the reference for target geometry and topology.
-- A target IR file, such as target.ir.jsonl: a compact B-rep description that may contain units, bounding box, volume, area, face types, surface parameters, local coordinate frames, boundary contours, and adjacency. Read the IR first when provided.
+- A target IR file, such as target.ir.jsonl: the STEPIR v6.2 description (header, face records with local frames and loops, prism structure, carrier parameters, and derived fillet/chamfer, sharp, op, freeform and axis lines). Read it first; create it with `stepir.py` when it is missing.
 - The actual runtime: a designated Python interpreter, SDK version, related commands, and supporting materials or tools allowed by the task.
 - Evaluation requirements, when provided: evaluation tools, invocation instructions, metric definitions, and acceptance thresholds.
-- Source-code conventions and delivery requirements: these may include feature-tree structure, parameter precision, single-body or multi-body organization, and files such as rebuild.py, final.py, model packages, STEP files, and reports.
+- Source-code conventions and delivery requirements, such as the notebook path, report fields, or extra exported files.
 
 Do not ask again for dimensions, paths, execution methods, or requirements already provided. When essential information is missing, inspect the workspace and environment instructions first. Use question if a blocking issue remains.
 
-When the task provides evaluation criteria, evaluate against those criteria. Otherwise, do not introduce scoring metrics, score thresholds, or an additional scoring process. Continue to perform the normal build, export, and geometric-validity checks required by the skill.
+Acceptance is `stepeval.py` reporting `"ok": true`: clean notebook format, a fresh run that succeeds, one solid, volumetric IoU of at least 0.99, and `complete` (face count and surface types agree with the target, so no blend group or detail was left out). When the task names another evaluator or threshold, that one decides; report it separately from `stepeval.py`, and evaluate the final artifact again rather than reusing another candidate's result.
 
 If the available tools or SDK lack capabilities essential to reconstruction or the required evaluation, or existing evidence shows that the evaluation requirements cannot be met and no viable repair remains, stop further attempts. In the final answer, explain which geometry, features, or parameters cannot be inferred from the available evidence, or which specific requirements cannot be implemented or verified, and why. Do not repeat the same failing approach, invent missing information, lower the criteria, or force delivery of a model claimed to pass. Preserve an existing valid candidate when available, but clearly label it as below requirements or unverified.
 
-Target STEP, IR, and BREP data may be read during separate inspection or measurement activities allowed by the task. Delivered reconstruction source and its dependencies must generate geometry independently through modeling operations and explicit parameters. They must not read or copy target geometry at execution time or replay a snapshot of target geometry.
+Target STEP, IR, and BREP data may be read during separate inspection or measurement activities allowed by the task. The delivered notebook and its dependencies must generate geometry independently through modeling operations and explicit parameters. They must not read or copy target geometry at execution time or replay a snapshot of target geometry.
 
-Preserve single-body, multi-body, and disconnected structures according to the actual geometry. Do not add connecting material absent from the target merely to satisfy a single-solid format. When geometric evidence does not uniquely establish the original modeling history, describe the chosen feature tree as a reconstruction hypothesis rather than claiming to have recovered the original design history.
+Preserve single-body, multi-body, and disconnected structures according to the actual geometry. Do not add connecting material absent from the target merely to satisfy a single-solid format; a multi-solid target is outside the workflow's scope and is reported as such. When geometric evidence does not uniquely establish the original modeling history, describe the chosen feature tree as a reconstruction hypothesis rather than claiming to have recovered the original design history.
 
-Follow the current task requirements and actual SDK capabilities for source format, numeric precision, and filenames. If rebuild.py and final.py are both required, execute the final source again. When evaluation criteria are specified, also evaluate the final artifact again; do not reuse another candidate's score.
+Distinguish run success, export success, geometric validity, target-comparison acceptance, and visual-review acceptance. These are separate results and cannot substitute for one another.
 
-Distinguish build success, export success, geometric validity, target-comparison acceptance, and visual-review acceptance. These are separate results and cannot substitute for one another.
+When using a designated evaluator, preserve its original output. Evaluator errors, unsupported target topology, or metric values outside their valid range do not establish acceptance. Clearly label supplementary diagnostics, document their methods and adjustments, and report them separately from the original evaluation.
 
-When using a designated evaluator, preserve its original output. Evaluator errors, unsupported target topology, or metric values outside their valid range do not establish acceptance. Clearly label supplementary diagnostics, document their methods and adjustments, and report them separately from the original evaluation. Supplementary diagnostics do not replace acceptance by the designated evaluator.
-
-Place actual renders, inspection reports, and comparison evidence needed for independent review under out/. Use task with subagent_type="cad-review" to inspect the real artifacts, and repair issues based on actual findings. Do not claim visual inspection without actually viewing the images.
+The evidence for STEP reconstruction is the evaluator's report: its failing cell and source line, its `missing`/`extra` regions, and its face statistics. Render images or start a `cad-review` task only when the user or task asks for visual review, or when a difference cannot be located from that report; never claim visual inspection without viewing the actual images.
 
 Deliver the files required by the current task that were actually generated. Reported metrics must come from actual evaluation of the corresponding artifacts. When no valid result exists, use a task-permitted null value or failure status and explain why. When stopping the task, clearly state what remains incomplete and what cannot be inferred; do not invent final artifacts.

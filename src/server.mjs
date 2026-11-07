@@ -179,7 +179,7 @@ app=http.createServer(async(req,res)=>{
       const statusFile=path.join(RUNTIME,'status.json');const status=JSON.parse(fs.readFileSync(statusFile));status.model=model;fs.writeFileSync(statusFile,JSON.stringify(status,null,2));
       return json(res,{...providerSummary(activeProvider),effective:'next_request'});
     }
-    if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,wireAPI,toolImageMode:'tool_multimodal_original',skill:'SimpleCADAPI 2.2.5',python:PYTHON,providerConfigured:Boolean(activeProvider),thinking:activeProvider?.thinking??true});
+    if(route==='/api/config')return json(res,{name:'CAD Code',model,temperature:1,context:262144,vision:true,wireAPI,toolImageMode:'tool_multimodal_original',skill:'SimpleCADAPI 2.2.7',python:PYTHON,providerConfigured:Boolean(activeProvider),thinking:activeProvider?.thinking??true});
     if(route==='/api/data'&&req.method==='GET'){const sessions=await oc('/session');return json(res,{items:workspaceInventory(sessions),config_token:configToken});}
     if(route==='/api/sessions'){
       if(req.method==='POST'){const a=await readJSON(req),s=await oc('/session','POST',{title:a.title||'新的 CAD 任务'});prepareSessionWorkspace(s.id);return json(res,s);}
@@ -245,4 +245,4 @@ app=http.createServer(async(req,res)=>{
 });
 if(webEnabled)await new Promise((resolve,reject)=>app.listen(port,'127.0.0.1',resolve).on('error',reject));
 fs.writeFileSync(path.join(RUNTIME,'cli-connection.json'),JSON.stringify({pid:process.pid,url:ocBase,password:ocPassword,configToken,model,routingModel,thinking:activeProvider?.thinking??true,website:webEnabled?`http://127.0.0.1:${port}`:null}),{mode:0o600});
-console.log(`CAD Code CLI backend ready: ${ocBase} · ${model} · SimpleCADAPI2.2.5${webEnabled?' · web http://127.0.0.1:'+port:''}`);
+console.log(`CAD Code CLI backend ready: ${ocBase} · ${model} · SimpleCADAPI2.2.7${webEnabled?' · web http://127.0.0.1:'+port:''}`);

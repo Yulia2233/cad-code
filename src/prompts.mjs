@@ -6,7 +6,7 @@ import {ROOT,RUNTIME,WORKSPACE,PYTHON,SKILL} from './paths.mjs';
 
 export const MAIN_PROMPT_MARKER='[CAD_CODE_TEMPLATE_ROLE:cad-code]';
 export const REVIEW_PROMPT_MARKER='[CAD_CODE_TEMPLATE_ROLE:cad-review]';
-const known=new Set(['MODEL_NAME','MODEL_ID','WORKING_DIRECTORY','WORKSPACE_ROOT','IS_GIT_REPO','PLATFORM','CURRENT_DATE','SESSION_WORKSPACE','PYTHON','SKILL_DIR','TOOLS_DIR','INPUT_FILE_LIST','PARENT_OUT']);
+const known=new Set(['MODEL_NAME','MODEL_ID','WORKING_DIRECTORY','WORKSPACE_ROOT','IS_GIT_REPO','PLATFORM','CURRENT_DATE','SESSION_WORKSPACE','PYTHON','SKILL_DIR','SKILL_SCRIPTS','INPUT_FILE_LIST','PARENT_OUT']);
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 
 function placeholders(template){
@@ -65,7 +65,7 @@ export function compileSessionPrompts({sessionID,model,parentID,agent='cad-code'
   if(!providerID||!modelID||!(model.api?.id||modelID))throw Error('PromptTemplateError: missing actual model identity');
   const templates=loadPromptTemplates(templateDir),inputs=path.join(cwd,'input');
   const names=fs.existsSync(inputs)?fs.readdirSync(inputs,{withFileTypes:true}).filter(x=>x.isFile()).map(x=>x.name).sort():[];
-  const values={MODEL_NAME:model.api?.id||modelID,MODEL_ID:`${providerID}/${modelID}`,WORKING_DIRECTORY:cwd,WORKSPACE_ROOT:cwd,IS_GIT_REPO:fs.existsSync(path.join(cwd,'.git'))?'yes':'no',PLATFORM:process.platform,CURRENT_DATE:dateText(now),SESSION_WORKSPACE:cwd,PYTHON:python,SKILL_DIR:skill,TOOLS_DIR:path.join(cwd,'tools'),INPUT_FILE_LIST:names.map(name=>JSON.stringify('input/'+name)).join(', '),PARENT_OUT:agent==='cad-review'?path.join(checkedSession(parentID,workspace),'out'):''};
+  const values={MODEL_NAME:model.api?.id||modelID,MODEL_ID:`${providerID}/${modelID}`,WORKING_DIRECTORY:cwd,WORKSPACE_ROOT:cwd,IS_GIT_REPO:fs.existsSync(path.join(cwd,'.git'))?'yes':'no',PLATFORM:process.platform,CURRENT_DATE:dateText(now),SESSION_WORKSPACE:cwd,PYTHON:python,SKILL_DIR:skill,SKILL_SCRIPTS:path.join(skill,'scripts'),INPUT_FILE_LIST:names.map(name=>JSON.stringify('input/'+name)).join(', '),PARENT_OUT:agent==='cad-review'?path.join(checkedSession(parentID,workspace),'out'):''};
   const additions=[];
   if(names.length)additions.push(renderTemplate(templates.inputFiles,values));
   if(agent==='cad-review'){

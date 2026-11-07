@@ -32,6 +32,11 @@ ANGULAR_DEG = 8.0
 def mesh_of(path):
     diag = brep.inspect_step_rsummary(path=str(path))["bounding_box"]["diagonal"]
     shape = brep.load_step_rshape(path=str(path))
+    try:                                   # SimpleCADAPI >= 2.2.7: the loader returns a raw OCCT shape, the mesher wants an SDK shape
+        from simplecadapi._glue.bridge import from_occt
+        shape = from_occt(shape)
+    except ImportError:                    # <= 2.2.6: the OCP shape is accepted as it is
+        pass
     v, t = tessellate_solid(shape, linear_deflection=max(diag * REL_DEFLECTION, 1e-6),
                             angular_deflection_degrees=ANGULAR_DEG, relative=False)
     return v, t

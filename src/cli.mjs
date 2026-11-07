@@ -14,7 +14,7 @@ if(argv[0]==='ask'){
   process.exit(process.exitCode||0);
 }
 if(argv.includes('--help')||argv.includes('-h')){
-  console.log(`CAD Code · OpenCode terminal agent\n\n  ./cad-code                         打开交互终端\n  ./cad-code --continue              继续上次会话\n  ./cad-code --session ses_...        打开指定会话\n  ./cad-code --file target.step      复制输入文件并打开终端\n  ./cad-code ask "问题"              独立单轮请求，只输出答案\n  ./cad-code run "任务"              执行一项任务并显示工具与思考\n  ./cad-code --mini                  使用紧凑终端界面\n  ./cad-code config                  配置 Base URL、模型名和隐藏的 API key\n  ./cad-code config --show           查看地址与密钥是否已配置\n  ./cad-code config --thinking on|off 控制模型思考\n  ./cad-code list                    列出对话与工作区\n  ./cad-code delete workspace ID     清理工作区，保留轨迹\n  ./cad-code delete conversation ID  删除对话/轨迹，保留文件\n  ./cad-code --credentials PATH      指定已有API配置文件\n  ./cad-code --web                   启动网页；CLI可同时连接\n\n默认模型 qwen-v8；完整 SimpleCADAPI2.2.5 skill。\n会话保存在 cad-code/.runtime，建模文件在 cad-code/workspace/<会话ID>/。`);process.exit(0);
+  console.log(`CAD Code · OpenCode terminal agent\n\n  ./cad-code                         打开交互终端\n  ./cad-code --continue              继续上次会话\n  ./cad-code --session ses_...        打开指定会话\n  ./cad-code --file target.step      复制输入文件并打开终端\n  ./cad-code ask "问题"              独立单轮请求，只输出答案\n  ./cad-code run "任务"              执行一项任务并显示工具与思考\n  ./cad-code --mini                  使用紧凑终端界面\n  ./cad-code config                  配置 Base URL、模型名和隐藏的 API key\n  ./cad-code config --show           查看地址与密钥是否已配置\n  ./cad-code config --thinking on|off 控制模型思考\n  ./cad-code list                    列出对话与工作区\n  ./cad-code export SESSION_ID       导出完整对话/工具轨迹 JSON\n  ./cad-code delete workspace ID     清理工作区，保留轨迹\n  ./cad-code delete conversation ID  删除对话/轨迹，保留文件\n  ./cad-code --credentials PATH      指定已有API配置文件\n  ./cad-code --web                   启动网页；CLI可同时连接\n\n默认模型 qwen-v8；完整 SimpleCADAPI2.2.7 skill。\n会话保存在 cad-code/.runtime，建模文件在 cad-code/workspace/<会话ID>/。`);process.exit(0);
 }
 if(argv[0]==='config'){try{await configureCLI(argv.slice(1));}catch(e){console.error(e.message);process.exitCode=1;}process.exit(process.exitCode||0);}
 const pass=[],inputFiles=[];let credentials;
@@ -74,7 +74,7 @@ if(inputFiles.length){
   const imports=importFiles(sessionID,inputFiles);console.log('输入已复制到 '+path.join(WORKSPACE,sessionID)+': '+imports.join(', '));
   if(mode==='run')pass.push('\n本次输入文件已复制到会话工作区：'+imports.join(', ')+ '。请使用这些相对路径。');
 }
-console.log('\n  CAD Code · '+(connection.model||'qwen-v8')+' · SimpleCADAPI2.2.5 · 思考'+(connection.thinking===false?'关闭':'开启')+'\n  exec(code) · 本地CAD工作区 · Ctrl+C/Esc 按OpenCode界面操作\n');
+console.log('\n  CAD Code · '+(connection.model||'qwen-v8')+' · SimpleCADAPI2.2.7 · 思考'+(connection.thinking===false?'关闭':'开启')+'\n  exec(code) · 本地CAD工作区 · Ctrl+C/Esc 按OpenCode界面操作\n');
 const env={...process.env,OPENCODE_SERVER_PASSWORD:connection.password,OPENCODE_SERVER_USERNAME:'opencode',OPENCODE_CONFIG:path.join(RUNTIME,'opencode.json'),OPENCODE_CONFIG_DIR:path.join(RUNTIME,'xdg/config'),XDG_CONFIG_HOME:path.join(RUNTIME,'xdg/config'),XDG_DATA_HOME:path.join(RUNTIME,'xdg/data'),XDG_STATE_HOME:path.join(RUNTIME,'xdg/state'),XDG_CACHE_HOME:path.join(RUNTIME,'xdg/cache'),OPENCODE_DISABLE_CLAUDE_CODE:'true'};
 let command;
 if(mode==='run')command=['run','--attach',connection.url,'--dir',WORKSPACE,'--agent','cad-code','--model','cad-local/'+(connection.routingModel||connection.model||'qwen-v8'),'--thinking',...pass.slice(1)];

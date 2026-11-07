@@ -1,6 +1,6 @@
 # CAD Code
 
-基于 **OpenCode** 的本地 CAD Agent，提供终端 CLI 和网页两种交互方式。默认使用 **Qwen v8**（`qwen-v8`）、完整 **SimpleCADAPI 2.2.5 skill**，执行真实建模、检查、STEP/STL 导出和渲染。
+基于 **OpenCode** 的本地 CAD Agent，提供终端 CLI 和网页两种交互方式。默认使用 **Qwen v8**（`qwen-v8`）、完整 **SimpleCADAPI 2.2.7 skill**（含按 STEPIR v6.2 重写的 STEP 逆向流程），执行真实建模、检查、STEP/STL 导出和渲染。
 
 ## 现在体验
 
@@ -65,10 +65,16 @@ your-secret-manager-command | ./cad-code config --base-url https://your-provider
 
 ```bash
 ./cad-code list
+./cad-code export ses_...                        # 导出到 ./ses_....json，不覆盖已有文件
+./cad-code export ses_... --output trajectory.json
+./cad-code export ses_... --output - | jq '.messages' # 原始 JSON 写到 stdout
+./cad-code export ses_... --output trajectory.json --force # 明确覆盖
 ./cad-code delete workspace ses_...      # 确认后只清理文件
 ./cad-code delete conversation ses_...   # 确认后只删除记录
 # 脚本中须明确添加 --yes；未确认不执行删除。
 ```
+
+轨迹导出复用网页的 `cad-code-session-v2` JSON：保留 OpenCode 原始 `messages[].parts`（用户输入、助手 reasoning/text、工具参数和结果）以及完整 `tool_media` 图片/文字记录，不转换成 SFT 模板。输出文件创建权限为 `0600`；默认拒绝覆盖，需明确传 `--force`。`--output -` 只向 stdout 写 JSON，适合管道。
 
 运行中的任务及子评审会拒绝删除，需先停止。对话删除不保留应用内恢复副本；归属不明或损坏的旧记录不会猜测删除，会提示数量。这里的删除是清除应用记录，不是SSD/SQLite底层取证擦除。
 

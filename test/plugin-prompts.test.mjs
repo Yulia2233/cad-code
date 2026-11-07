@@ -69,12 +69,13 @@ test('live selection controls prompt identity and reasoning without changing the
   `);
 });
 
-test('native CLI session creation prepares tools before any prompt or execution',async t=>{
+test('native CLI session creation prepares the workspace without copying tools',async t=>{
   await scenario(t,`
     const hooks=await CADCodePlugin({client:{}}),id='ses_hook_created';
     await hooks.event({event:{type:'session.created',properties:{info:{id}}}});
-    for(const name of ['cadeval.py','stepir.py','families_common.py'])assert.ok(fs.statSync(path.join(sessionDir(id),'tools',name)).isFile());
-    const file=path.join(sessionDir(id),'tools/families_common.py');fs.writeFileSync(file,'# user change\\n');
+    assert.ok(fs.statSync(path.join(sessionDir(id),'.git')).isDirectory());
+    assert.equal(fs.existsSync(path.join(sessionDir(id),'tools')),false);
+    const file=path.join(sessionDir(id),'notes.txt');fs.writeFileSync(file,'# user change\\n');
     await hooks.event({event:{type:'session.created',properties:{info:{id}}}});
     assert.equal(fs.readFileSync(file,'utf8'),'# user change\\n');
     await hooks.dispose();

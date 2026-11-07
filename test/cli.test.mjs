@@ -31,7 +31,7 @@ else{
   else if(route==='/session'&&req.method==='POST'){value={id:'ses_mock_created_'+(++counter),title:body.title,time:{updated:Date.now()}};sessions.push(value);}
   else if(route==='/session')value=sessions;
   else if(route==='/session/status')value=process.env.MOCK_STATUS_FILE&&fs.existsSync(process.env.MOCK_STATUS_FILE)?JSON.parse(fs.readFileSync(process.env.MOCK_STATUS_FILE)):{};
-  else if(route.endsWith('/message')){value=[];if(process.env.MOCK_MESSAGE_DELAY_FILE&&fs.existsSync(process.env.MOCK_MESSAGE_DELAY_FILE))await new Promise(resolve=>setTimeout(resolve,300));}
+  else if(route.endsWith('/message')){if(!sessions.some(s=>s.id===route.split('/')[2])){res.writeHead(404,{'content-type':'application/json'});return res.end('{}');}value=process.env.MOCK_MESSAGES_FILE&&fs.existsSync(process.env.MOCK_MESSAGES_FILE)?JSON.parse(fs.readFileSync(process.env.MOCK_MESSAGES_FILE)):[];if(process.env.MOCK_MESSAGE_DELAY_FILE&&fs.existsSync(process.env.MOCK_MESSAGE_DELAY_FILE))await new Promise(resolve=>setTimeout(resolve,300));}
   else if(route.startsWith('/session/')&&req.method==='DELETE'){const id=route.split('/')[2],ids=new Set([id]);let changed=true;while(changed){changed=false;for(const s of sessions)if(ids.has(s.parentID)&&!ids.has(s.id)){ids.add(s.id);changed=true;}}for(let i=sessions.length-1;i>=0;i--)if(ids.has(sessions[i].id))sessions.splice(i,1);value=true;}
   else if(route.startsWith('/session/')){value=sessions.find(s=>s.id===route.split('/')[2]);if(!value){res.writeHead(404);return res.end('{}');}}
   else value={};
@@ -195,8 +195,57 @@ test('web model selection changes actual upstream requests, CLI status and persi
 
 test('CLI --help needs no credential and starts no backend',async t=>{
   const f=await fixture(t),r=await f.finish(f.cli(['--help']));
-  assert.equal(r.exit.code,0);assert.match(r.stdout,/OpenCode terminal agent/);assert.match(r.stdout,/--file/);
+  assert.equal(r.exit.code,0);assert.match(r.stdout,/OpenCode terminal agent/);assert.match(r.stdout,/--file/);assert.match(r.stdout,/export SESSION_ID/);
   assert.equal(fs.existsSync(f.runtime),false);assert.deepEqual(f.events(),[]);
+});
+
+test('CLI export preserves inputs, reasoning, assistant text, tool calls and results; output is private and never silently overwritten',async t=>{
+  const f=await fixture(t),id='ses_mock_previous',messagesFile=path.join(f.directory,'messages.json'),output=path.join(f.directory,'trajectory.json');
+  f.env.MOCK_MESSAGES_FILE=messagesFile;
+  const messages=[
+    {info:{id:'msg_user',sessionID:id,role:'user'},parts:[{id:'part_input',type:'text',text:'重建 target.step'}]},
+    {info:{id:'msg_assistant_1',sessionID:id,role:'assistant'},parts:[
+      {id:'part_reasoning',type:'reasoning',text:'先检查输入 STEP 的面和实体。'},
+      {id:'part_progress',type:'text',text:'我先读取模型结构。'},
+      {id:'part_tool',type:'tool',tool:'exec',callID:'call_export_1',state:{status:'completed',input:{code:'const r = await tools.exec_command({cmd:"python inspect.py"}); text(r);'},output:'solid_count=1\\nfaces=12\\n',metadata:{}}}
+    ]},
+    {info:{id:'msg_assistant_2',sessionID:id,role:'assistant'},parts:[{id:'part_final',type:'text',text:'模型已检查完成。'}]}
+  ];
+  fs.writeFileSync(messagesFile,JSON.stringify(messages));
+  const callID='call_export_1',code=messages[1].parts[2].state.input.code,outputText=messages[1].parts[2].state.output;
+  const mediaContent=[{type:'input_text',text:'检查完成'}, {type:'input_image',image_url:'data:image/png;base64,aGVsbG8='}];
+  const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
+  const mediaDirectory=path.join(f.runtime,'tool-media',sha(callID));fs.mkdirSync(mediaDirectory,{recursive:true});
+  fs.writeFileSync(path.join(mediaDirectory,sha(id)+'.json'),JSON.stringify({version:1,sessionID:id,callID,tool:'exec',codeHash:sha(code),outputHash:sha(outputText),contentHash:sha(JSON.stringify(mediaContent)),failed:false,content:mediaContent}));
+  messages[1].parts[2].state.metadata.cadMedia={callID};fs.writeFileSync(messagesFile,JSON.stringify(messages));
+  const backend=f.cli(['--web','--credentials',f.credentials]),connection=await until(()=>f.connection());
+  const exported=await f.finish(f.cli(['export',id,'--output',output]));
+  assert.equal(exported.exit.code,0,exported.stderr);assert.match(exported.stdout,/3 条消息、1 次工具调用（1 条含结果）、1 份工具媒体/);
+  assert.equal(fs.statSync(output).mode&0o777,0o600);
+  const trajectory=JSON.parse(fs.readFileSync(output,'utf8'));
+  assert.equal(trajectory.schema_version,'cad-code-session-v2');assert.equal(trajectory.id,id);assert.equal(trajectory.model,'qwen-v8');
+  assert.deepEqual(trajectory.messages,messages);assert.equal(trajectory.tool_media.length,1);assert.deepEqual(trajectory.tool_media[0].content,mediaContent);
+  assert.equal(trajectory.messages[0].parts[0].text,'重建 target.step');
+  assert.equal(trajectory.messages[1].parts[0].text,'先检查输入 STEP 的面和实体。');
+  assert.equal(trajectory.messages[1].parts[1].text,'我先读取模型结构。');
+  assert.equal(trajectory.messages[1].parts[2].state.input.code.includes('inspect.py'),true);
+  assert.equal(trajectory.messages[1].parts[2].state.output,'solid_count=1\\nfaces=12\\n');
+  assert.equal(trajectory.messages[2].parts[0].text,'模型已检查完成。');
+  const blocked=await f.finish(f.cli(['export',id,'-o',output]));assert.notEqual(blocked.exit.code,0);assert.match(blocked.stderr,/EEXIST|already exists/i);
+  assert.deepEqual(JSON.parse(fs.readFileSync(output,'utf8')),trajectory);
+  const replaced=await f.finish(f.cli(['export',id,'--output',output,'--force']));assert.equal(replaced.exit.code,0,replaced.stderr);
+  const streamed=await f.finish(f.cli(['export',id,'--output','-']));assert.equal(streamed.exit.code,0,streamed.stderr);
+  assert.deepEqual(JSON.parse(streamed.stdout),trajectory);
+  assert.equal(streamed.stderr,'');
+  backend.child.kill('SIGTERM');await f.finish(backend);
+});
+
+test('CLI export rejects invalid IDs and does not create a destination when the session is missing',async t=>{
+  const f=await fixture(t),backend=f.cli(['--web','--credentials',f.credentials]);await until(()=>f.connection());
+  const invalid=await f.finish(f.cli(['export','not-a-session']));assert.notEqual(invalid.exit.code,0);assert.match(invalid.stderr,/cad-code export/);
+  const output=path.join(f.directory,'missing.json'),missing=await f.finish(f.cli(['export','ses_missing','--output',output]));
+  assert.notEqual(missing.exit.code,0);assert.equal(fs.existsSync(output),false);
+  backend.child.kill('SIGTERM');await f.finish(backend);
 });
 
 test('workspace and conversation deletion are independent, authenticated, and do not recreate a cleared workspace',async t=>{
@@ -252,7 +301,7 @@ test('CLI --file creates/binds one session, uses isolated config and cleans up i
   assert.doesNotMatch(fs.readFileSync(path.join(f.runtime,'opencode.json'),'utf8'),/MOCK_ONLY_NOT_A_REAL_CREDENTIAL/);
   assert.equal(fs.statSync(path.join(f.runtime,'opencode.json')).mode&0o777,0o600);
   assert.deepEqual(fs.readFileSync(path.join(f.workspace,'ses_mock_created_1/input/圆柱.step')),bytes);assert.deepEqual(fs.readFileSync(source),bytes);
-  for(const name of ['stepir.py','cadeval.py','families_common.py'])assert.ok(fs.statSync(path.join(f.workspace,'ses_mock_created_1/tools',name)).isFile());
+  assert.ok(fs.statSync(path.join(f.workspace,'ses_mock_created_1/.git')).isDirectory());assert.equal(fs.existsSync(path.join(f.workspace,'ses_mock_created_1/tools')),false);
   const connection=f.connection();assert.ok(connection);await until(()=>!alive(connection.pid));
   const serve=events.find(e=>e.event==='spawn'&&e.mode==='serve');await until(()=>!alive(serve.pid));
 });
@@ -289,7 +338,7 @@ test('CLI --web keeps its owned backend until termination and does not spawn a t
   const response=await fetch(connection.website+'/api/config');assert.equal(response.status,200);assert.equal((await response.json()).model,'qwen-v8');
   const created=await fetch(connection.website+'/api/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'Workspace tools'})});
   assert.equal(created.status,200);const session=await created.json();
-  for(const name of ['stepir.py','cadeval.py','families_common.py','cadthreads.py','robust_iou.py','frozen/compare.py'])assert.ok(fs.statSync(path.join(f.workspace,session.id,'tools',name)).isFile());
+  assert.ok(fs.statSync(path.join(f.workspace,session.id,'.git')).isDirectory());assert.equal(fs.existsSync(path.join(f.workspace,session.id,'tools')),false);
   r.child.kill('SIGTERM');const exited=await f.finish(r);assert.equal(exited.exit.code,0);
   await until(()=>!alive(connection.pid));
 });

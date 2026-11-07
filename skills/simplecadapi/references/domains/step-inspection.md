@@ -24,6 +24,9 @@ candidates, and gather reconstruction evidence with the
 
 - `references/inspect/brep-reverse-engineering.md` — read completely before any
   inspection or target/candidate comparison work.
+- `references/inspect/stepir.md` — the compact face-table description of a target
+  STEP (`scripts/stepir.py`); a STEP reconstruction reads this instead of the
+  primitives below.
 - `references/docs/guides/reconstruction-agent-strategy.md` — advisory tactics
   only.
 - `references/docs/guides/reconstruction-agent-test-prompt.md` — the controlled

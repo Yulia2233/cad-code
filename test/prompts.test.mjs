@@ -70,10 +70,10 @@ test('compiled prompts use real session workspace, current model/date and contai
   assert.ok(compiled.system.includes('Workspace root folder: '+f.workspace));
   assert.equal(compiled.values.CURRENT_DATE,'Tue Nov 03 2026');assert.ok(compiled.system.includes("Today's date: "+compiled.values.CURRENT_DATE));
   assert.ok(compiled.runtime.includes(expected));assert.ok(compiled.runtime.includes(f.python));assert.ok(compiled.runtime.includes(f.skill+'/SKILL.md'));
-  assert.ok(compiled.runtime.includes(path.join(expected,'tools/cad.py')));
-  assert.equal(compiled.values.TOOLS_DIR,path.join(expected,'tools'));
-  assert.match(compiled.runtime,/tools\/stepir\.py input\/target\.step/);
-  assert.match(compiled.runtime,/tools\/cadeval\.py eval/);
+  assert.equal(compiled.values.SKILL_SCRIPTS,path.join(f.skill,'scripts'));
+  assert.ok(compiled.runtime.includes(path.join(f.skill,'scripts/stepir.py')+' input/target.step'));
+  assert.ok(compiled.runtime.includes(path.join(f.skill,'scripts/stepeval.py')+' part.py'));
+  assert.doesNotMatch(compiled.runtime,/tools\/(cad|cadeval|stepir|stepeval)\.py/);
   noPlaceholders(compiled.system);noPlaceholders(compiled.runtime);
   assert.ok(compiled.values);assert.ok(compiled.templateHashes);
   assert.doesNotMatch(compiled.runtime,/This document records|本文记录|基础 agent|## Source/);

@@ -2,6 +2,12 @@
 
 ## Unreleased — 2026-11-02
 
+- 2026-11-07：会话初始化不再复制任何工具，工作区不再有 `tools/`。CAD 脚本只用 skill 自带的 `skills/simplecadapi/scripts/stepir.py`、`stepeval.py`，按绝对路径只读运行（运行时提示词新增 `{{SKILL_SCRIPTS}}`）；`tools/` 只保留给 bench_cli 评分器用的 `cadeval.py`、`robust_iou.py`、`frozen/compare.py`、`cadthreads.py`，其余移到 `.runtime/tools-backup/`。
+
+- 2026-11-07：升级到 SimpleCADAPI 2.2.7。独立 Python 环境改装 `simplecadapi[editor,verify]==2.2.7`（自带 C++ 几何内核，含网页编辑器和 OCP），旧 2.2.5 环境保留在 `.runtime/python-2.2.5`；内置 skill 换成改版 2.2.7（STEP 逆向流程重写：STEPIR v6.2 读法与注意事项、网页编辑器 notebook 格式、`scripts/stepir.py` 与 `scripts/stepeval.py`），旧 skill 备份在 `.runtime/skill-backup/`；会话工具新增 `stepeval.py`，`stepir.py` 升级到 v6.2.2，`robust_iou.py` 适配 2.2.7；系统提示词与运行时提示词改为按新流程执行（notebook 格式、以 stepeval 报告为证据，视觉复核按需）。
+
+- 2026-11-06：新增 `cad-code export SESSION_ID`，复用网页会话导出格式，完整保留用户输入、reasoning/assistant文本、工具调用参数和结果及有序媒体；支持默认防覆盖的0600文件、`--force` 和 stdout 管道输出。
+
 - 2026-11-05：新增独立 `ask` 单轮CLI，直接请求提供商，只发送一条用户问题；支持参数/stdin、临时模型/思考覆盖、思考单独输出至stderr，且不启动OpenCode、不注入提示词/历史/工具、不建立本地会话或工作区。
 
 - 2026-11-05：修复Qwen思考已生成但显示为空：将完整`reasoning_text`流事件逐字映射到OpenCode支持的`reasoning_summary_text`协议，原始流、客户端流和审计独立保留；不生成摘要、不修改正文或工具结果。空卡片恢复脚本按会话/item/content index唯一匹配原始事件，不明或重复时跳过；包含8项恢复回归的完整测试143/143通过。
