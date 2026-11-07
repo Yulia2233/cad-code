@@ -51,7 +51,7 @@ exporters) lives in `scadpkg-format.md`.
 | --- | --- |
 | `single-part-modeling` | one physical part from brief to validated solid — sketch tier by default, std parts first |
 | `assembly-product-build` | multi-part product or mechanism with connectors/constraints and package capture; stdlib gears/bearings live here |
-| `step-reconstruction` | editable rebuild from a target STEP with tiered acceptance |
+| `step-reconstruction` | editable notebook rebuilt from a target STEP: STEPIR evidence, fixed notebook format, one evaluation command |
 | `drawing-reconstruction` | editable rebuild from vector-PDF dimensions with stage checks and independent drawing/model/output acceptance |
 | `export-and-translation` | downstream formats from a validated package |
 

@@ -74,12 +74,17 @@ async function newSession(){
   try{return await state.creating;}catch(e){showError(e);throw e;}finally{state.creating=null;}
 }
 function toolPart(part,index){
-  const s=part.state||{},id=part.id||'tool-'+index,status=s.status||'pending';
+  const s=part.state||{},id=part.id||'tool-'+index,status=s.metadata?.cadExecutionError?'error':s.status||'pending';
   const toolName=part.tool||'工具',box=el('div','tool-sections');
   const input=typeof s.input==='object'&&s.input!==null&&typeof s.input.code==='string'?s.input.code:readable(s.input||{});
   box.append(fold(id+'-input','调用参数',input.length.toLocaleString()+' 字符',el('pre',null,input)));
-  if(s.output!==undefined||s.error){const output=s.error||s.output;box.append(fold(id+'-output',s.error?'错误结果':'调用结果',typeof output==='string'?output.length.toLocaleString()+' 字符':'',el('pre',null,readable(output)),{open:status==='error'}));}
+  const media=s.metadata?.cadMedia;
+  if(s.output!==undefined||s.error){const output=s.error||(media?media.visibleOutput:s.output),body=el('div');
+    if(media?.parts){for(const p of media.parts){if(p.type==='input_text')body.append(el('pre',null,p.text));else if(p.type==='input_image'){const image=el('img','tool-result-image');image.src='/api/sessions/'+encodeURIComponent(part.sessionID||state.id)+'/tool-image?call='+encodeURIComponent(media.callID)+'&index='+p.index;image.alt=media.images?.[p.index]?.filename||'工具返回原图';body.append(image);}}}
+    else body.append(el('pre',null,readable(output)));
+    box.append(fold(id+'-output',s.error||s.metadata?.cadExecutionError?'错误结果':'调用结果',typeof output==='string'?output.length.toLocaleString()+' 字符':'',body,{open:status==='error'}));}
   for(const a of [...(s.attachments||[]),...(part.attachments||[])])if(a.mime?.startsWith('image/')&&/^(data:image\/|\/api\/)/.test(a.url||'')){const image=el('img','tool-result-image');image.src=a.url;image.alt=a.filename||'工具返回图像';box.append(image);}
+  if(!media?.parts)for(const a of media?.images||[]){const image=el('img','tool-result-image');image.src='/api/sessions/'+encodeURIComponent(part.sessionID||state.id)+'/tool-image?call='+encodeURIComponent(media.callID)+'&index='+a.index;image.alt=a.filename||'工具返回原图';box.append(image);}
   const outer=fold(id+'-outer',toolName,({completed:'已完成',error:'执行错误',running:'正在执行',pending:'等待执行'})[status]||status,box,{open:status==='running'||status==='error',className:'tool-fold'});
   const summary=outer.querySelector('summary');summary.insertBefore(el('span','tool-state '+status),summary.firstChild);return outer;
 }
@@ -171,6 +176,68 @@ async function upload(files){
   try{if(!state.id)await newSession();const id=state.id;for(const file of files){if(file.size>32*1024*1024)throw Error('文件超过32MB：'+file.name);const value=await api('/api/sessions/'+id+'/upload?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});if(id===state.id&&!state.uploads.includes(value.path))state.uploads.push(value.path);}renderUploadChips();await refresh();$('prompt').focus();}
   catch(e){showError(e);}finally{$('uploadButton').disabled=false;$('fileInput').value='';}
 }
+let dataToken='';
+async function openDataManager(){
+  const data=await api('/api/data');dataToken=data.config_token;$('dataItems').replaceChildren();
+  for(const item of data.items){
+    const card=el('div','data-item');card.append(el('strong',null,item.title),el('code',null,item.id));
+    card.append(el('small',null,(item.hasConversation?'对话已保存':'无对话记录')+' · '+(item.hasWorkspace?item.files+' 个文件 · '+fmtSize(item.bytes):'无工作区文件')));
+    const actions=el('div','data-actions'),workspace=el('button',null,'清理工作区'),conversation=el('button','danger-button','删除对话与轨迹');
+    workspace.disabled=!item.hasWorkspace;conversation.disabled=!item.hasConversation;
+    workspace.addEventListener('click',()=>deleteSessionData(item,'workspace'));conversation.addEventListener('click',()=>deleteSessionData(item,'conversation'));
+    actions.append(workspace,conversation);card.append(actions);$('dataItems').append(card);
+  }
+  if(!data.items.length)$('dataItems').append(el('p',null,'没有已保存的对话或工作区。'));
+  if(!$('dataDialog').open)$('dataDialog').showModal();
+}
+async function deleteSessionData(item,scope){
+  const message=scope==='workspace'?'删除此工作区的输入、代码、模型和缓存文件？对话、思考、工具记录和轨迹保留。':'删除此对话及其子评审的消息、思考和工具轨迹？工作区中的代码、模型和输入文件保留。';
+  if(!window.confirm(message+'\n\n'+item.title+'\n'+item.id))return;
+  $('dataNotice').textContent='处理中…';$('dataNotice').className='';
+  try{
+    const result=await api('/api/sessions/'+item.id+'/'+scope,{method:'DELETE',headers:{'x-cad-config-token':dataToken},body:JSON.stringify({confirm:item.id})});
+    if(scope==='conversation'&&(result.deleted_sessions||[item.id]).includes(state.id)){
+      state.id=null;state.requestGeneration++;state.pendingUntil=0;state.uploads=[];resetView();renderUploadChips();localStorage.removeItem('cad-code-session');history.replaceState(null,'',location.pathname);$('sessionTitle').textContent='开始一个 CAD 任务';$('exportSession').hidden=true;setBusy(false);
+    }else if(scope==='workspace'&&item.id===state.id){state.selectedFile=null;state.previewFingerprint='';$('previewImage').hidden=true;$('previewCode').hidden=true;$('previewEmpty').hidden=false;$('previewCaption').hidden=true;await refresh();}
+    await loadSessions();await openDataManager();
+    $('dataNotice').textContent=(scope==='workspace'?'工作区已清理，对话和轨迹保留。':'对话和轨迹已删除，工作区文件保留。')+(result.unknown?.length?'有 '+result.unknown.length+' 项归属不明的记录保留。':'');
+  }catch(error){$('dataNotice').textContent=error.message;$('dataNotice').className='error';}
+}
+$('dataSettings').addEventListener('click',()=>{$('dataNotice').textContent='';openDataManager().catch(showError);});
+$('closeData').addEventListener('click',()=>$('dataDialog').close());
+let providerToken='';
+async function openProviderSettings(){
+  const config=await api('/api/provider');providerToken=config.config_token;
+  $('providerThinking').checked=config.thinking!==false;$('providerURL').value=config.base_url;$('providerKey').value='';$('providerKey').required=!config.api_key_configured;
+  $('providerKey').placeholder=config.api_key_configured?'已配置；留空保持原密钥':'输入 API key';
+  $('providerKeyHint').textContent=config.api_key_configured?'密钥已保存在本机；留空不会修改，填写新密钥将替换。':'密钥仅保存在本机，不会显示在配置响应中。';
+  $('providerModel').value=config.model||state.config?.model||'qwen-v8';$('providerModelList').replaceChildren();$('providerNotice').textContent='';$('providerNotice').className='';
+  if(!$('providerDialog').open)$('providerDialog').showModal();
+}
+$('apiSettings').addEventListener('click',()=>openProviderSettings().catch(showError));
+$('loadProviderModels').addEventListener('click',async()=>{
+  $('loadProviderModels').disabled=true;$('providerNotice').textContent='获取模型列表…';$('providerNotice').className='';
+  try{const result=await api('/api/provider/models',{method:'POST',headers:{'x-cad-config-token':providerToken},body:JSON.stringify({base_url:$('providerURL').value,api_key:$('providerKey').value,model:$('providerModel').value||'qwen-v8'})});
+    $('providerModelList').replaceChildren(...result.models.map(id=>{const option=el('option');option.value=id;return option;}));
+    $('providerNotice').textContent=result.models.length?'已获取 '+result.models.length+' 个模型，点击模型 ID 输入框选择。':'接口未列出模型，请直接填写模型 ID。';$('providerModel').focus();
+  }catch(error){$('providerNotice').textContent=error.message;$('providerNotice').className='error';}
+  finally{$('loadProviderModels').disabled=false;}
+});
+for(const id of ['closeProvider','cancelProvider'])$(id).addEventListener('click',()=>$('providerDialog').close());
+$('providerDialog').addEventListener('close',()=>{$('providerKey').value='';providerToken='';});
+$('providerForm').addEventListener('submit',async event=>{
+  event.preventDefault();$('saveProvider').disabled=true;$('providerNotice').textContent='保存中…';$('providerNotice').className='';
+  try{
+    const saved=await api('/api/provider',{method:'PUT',headers:{'x-cad-config-token':providerToken},body:JSON.stringify({base_url:$('providerURL').value,api_key:$('providerKey').value,model:$('providerModel').value,thinking:$('providerThinking').checked})});
+    $('modelName').textContent=saved.model;if(state.config){state.config.model=saved.model;state.config.thinking=saved.thinking;}
+    $('modelOptions').textContent='temperature 1 · 256k · vision · 思考'+(saved.thinking?'开启':'关闭');
+    $('providerKey').value='';$('providerKey').required=false;$('providerKey').placeholder='已配置；留空保持原密钥';
+    $('providerKeyHint').textContent='密钥已保存在本机；留空不会修改，填写新密钥将替换。';
+    $('providerNotice').textContent='配置已保存，下一次模型请求生效。';
+    if(state.config)state.config.providerConfigured=true;
+  }catch(error){$('providerNotice').textContent=error.message;$('providerNotice').className='error';}
+  finally{$('saveProvider').disabled=false;}
+});
 $('newSession').addEventListener('click',()=>newSession().catch(()=>{}));$('composer').addEventListener('submit',submit);
 $('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();submit();}});
 $('stopButton').addEventListener('click',async()=>{if(!state.id)return;$('stopButton').disabled=true;try{await post('/api/sessions/'+state.id+'/stop',{});state.pendingUntil=0;await refresh();}catch(e){showError(e);}finally{$('stopButton').disabled=false;}});
@@ -178,10 +245,14 @@ $('uploadButton').addEventListener('click',()=>$('fileInput').click());$('fileIn
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newSession().catch(()=>{});}});
 for(const b of document.querySelectorAll('[data-example]'))b.addEventListener('click',()=>{$('prompt').value=b.dataset.example;$('prompt').focus();});
 window.addEventListener('hashchange',()=>{const id=decodeURIComponent(location.hash.slice(1));if(/^ses_[\w-]+$/.test(id))chooseSession(id);});
+function displayConfig(config){
+  state.config=config;$('modelName').textContent=config.model;$('skillName').textContent=config.skill;
+  $('modelOptions').textContent='temperature '+config.temperature+' · '+Math.round(config.context/1024)+'k · '+(config.vision?'vision':'text')+' · 思考'+(config.thinking===false?'关闭':'开启');
+}
 async function init(){
-  try{state.config=await api('/api/config');$('modelName').textContent=state.config.model;$('skillName').textContent=state.config.skill;$('modelOptions').textContent='temperature '+state.config.temperature+' · '+Math.round(state.config.context/1024)+'k · '+(state.config.vision?'vision':'text');await loadSessions();online(true);const hash=decodeURIComponent(location.hash.slice(1)),saved=localStorage.getItem('cad-code-session');const id=[hash,saved].find(x=>state.sessions.some(s=>s.id===x));if(id)await chooseSession(id);}
+  try{displayConfig(await api('/api/config'));await loadSessions();online(true);if(state.config.providerConfigured===false)await openProviderSettings();const hash=decodeURIComponent(location.hash.slice(1)),saved=localStorage.getItem('cad-code-session');const id=[hash,saved].find(x=>state.sessions.some(s=>s.id===x));if(id)await chooseSession(id);}
   catch(e){online(false);showError(e);}
   let iteration=0;
-  setInterval(async()=>{if(state.polling)return;state.polling=true;try{await refresh();if(++iteration%5===0)await loadSessions();}catch(e){online(false);}finally{state.polling=false;}},1000);
+  setInterval(async()=>{if(state.polling)return;state.polling=true;try{await refresh();if(++iteration%5===0){await loadSessions();displayConfig(await api('/api/config'));}}catch(e){online(false);}finally{state.polling=false;}},1000);
 }
 init();
