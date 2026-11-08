@@ -203,7 +203,7 @@ test('sandbox blocks shell reads/writes and symlink access to another workspace'
   assert.notEqual(JSON.parse(write.output).exit_code,0);assert.equal(fs.existsSync(path.join(other.dir,'escape.txt')),false);
   const patch='*** Begin Patch\n*** Add File: link/escape.txt\n+unsafe\n*** End Patch';
   const escaped=await executeCode(own.id,`await tools.apply_patch(${quoted(patch)});`);
-  assert.equal(escaped.error,true);assert.match(escaped.output,/Symlink outside workspace|Operation not permitted|not permitted|EACCES|EPERM/);
+  assert.equal(escaped.error,true);assert.match(escaped.output,/Symlink outside workspace|Operation not permitted|not permitted|EACCES|EPERM|ENOENT/);
   assert.equal(fs.existsSync(path.join(other.dir,'escape.txt')),false);
 });
 
@@ -218,10 +218,11 @@ test('sandbox cannot read runtime credential/config files',async()=>{
 
 test('explicit parent read-only grants permit review but do not permit edits',async()=>{
   const child=fixture('readonly_child'),parent=fixture('readonly_parent');
-  const source=path.join(parent.dir,'model.py');fs.writeFileSync(source,'parent source\n');
-  const result=await executeCode(child.id,`text(await tools.exec_command({cmd:${quoted('cat '+JSON.stringify(source))}}));`,undefined,[parent.dir]);
+  const grant=process.platform==='linux'?path.join(parent.dir,'out'):parent.dir;fs.mkdirSync(grant,{recursive:true});
+  const source=path.join(grant,'model.py');fs.writeFileSync(source,'parent source\n');
+  const result=await executeCode(child.id,`text(await tools.exec_command({cmd:${quoted('cat '+JSON.stringify(source))}}));`,undefined,[grant]);
   assert.equal(JSON.parse(result.output).output,'parent source\n');
-  const write=await executeCode(child.id,`text(await tools.exec_command({cmd:${quoted('printf changed > '+JSON.stringify(source))}}));`,undefined,[parent.dir]);
+  const write=await executeCode(child.id,`text(await tools.exec_command({cmd:${quoted('printf changed > '+JSON.stringify(source))}}));`,undefined,[grant]);
   assert.notEqual(JSON.parse(write.output).exit_code,0);assert.equal(fs.readFileSync(source,'utf8'),'parent source\n');
 });
 

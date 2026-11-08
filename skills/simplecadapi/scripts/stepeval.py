@@ -171,7 +171,12 @@ def run_notebook_fresh(nb, out, timeout):
         fh.write(RUNNER)
         runner = fh.name
     try:
-        r = subprocess.run([sys.executable, "-I", runner, str(nb), str(out)], capture_output=True, text=True,
+        command = [sys.executable, "-I", runner, str(nb), str(out)]
+        if sys.platform == "linux":
+            helper = Path(__file__).resolve().parents[3] / "src/linux-sandbox.py"
+            command = [sys.executable, "-I", str(helper), "notebook", "--notebook", str(nb),
+                       "--out", str(out), "--runner", runner]
+        r = subprocess.run(command, capture_output=True, text=True,
                            timeout=timeout, cwd=str(Path(nb).parent))
     except subprocess.TimeoutExpired:
         return {"run": {"error": f"timeout after {timeout} s"}}
