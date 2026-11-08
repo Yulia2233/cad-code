@@ -77,9 +77,12 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 ## 3D Operations
 
 - [extrude_rsolid](extrude_rsolid.md) *(from operators/features.py)* `top-level`
+- [extrude_taper_rsolid](extrude_taper_rsolid.md) *(from operators/features.py)* `top-level`
+- [extrude_until_rsolid](extrude_until_rsolid.md) *(from operators/features.py)* `top-level`
 - [loft_rshell](loft_rshell.md) *(from operators/geometry.py)* `top-level`
 - [loft_rsolid](loft_rsolid.md) *(from operators/features.py)* `top-level`
 - [revolve_rsolid](revolve_rsolid.md) *(from operators/features.py)* `top-level`
+- [sweep_multisection_rsolid](sweep_multisection_rsolid.md) *(from operators/features.py)* `top-level`
 - [sweep_rsolid](sweep_rsolid.md) *(from operators/features.py)* `top-level`
 
 ## Tagging and Selection
@@ -93,6 +96,7 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 ## Boolean Operations
 
 - [cut_rsolid](cut_rsolid.md) *(from operators/boolean.py)* `top-level`
+- [cut_rsolid_list](cut_rsolid_list.md) *(from operators/boolean.py)* `top-level`
 - [intersect_rsolid](intersect_rsolid.md) *(from operators/boolean.py)* `top-level`
 - [union_rsolid](union_rsolid.md) *(from operators/boolean.py)* `top-level`
 
@@ -113,6 +117,7 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [Fusion360Translator](Fusion360Translator.md) *(from translator/fusion360_translator/translator.py)* `translator backend`
 - [SolidWorksTranslator](SolidWorksTranslator.md) *(from translator/solidworks_translator/translator.py)* `translator backend`
 - [export_model_json_to_solidworks_step](export_model_json_to_solidworks_step.md) *(from translator/solidworks_translator/api.py)* `translator backend`
+- [make_interpolated_bspline_edge](make_interpolated_bspline_edge.md) *(from translator/solidworks_translator/translator.py)* `translator backend`
 - [translate_model_json_to_fcstd](translate_model_json_to_fcstd.md) *(from translator/freecad_translator/api.py)* `translator backend`
 - [translate_model_json_to_freecad_script](translate_model_json_to_freecad_script.md) *(from translator/freecad_translator/api.py)* `translator backend`
 - [translate_model_json_to_solidworks_script](translate_model_json_to_solidworks_script.md) *(from translator/solidworks_translator/api.py)* `translator backend`
@@ -320,13 +325,10 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [GeometryRef](GeometryRef.md) *(from product/connector.py)* `top-level`
 - [Material](Material.md) *(from product/material.py)* `top-level`
 - [Part](Part.md) *(from product/part.py)* `top-level`
-- [Placement](Placement.md) *(from product/placement.py)* `top-level`
 - [ProductPackage](ProductPackage.md) *(from product/packages.py)* `top-level`
 - [ProductPackageError](ProductPackageError.md) *(from product/packages.py)* `top-level`
 - [PublicConnectorRef](PublicConnectorRef.md) *(from product/assembly.py)* `top-level`
 - [ScalarLimit](ScalarLimit.md) *(from product/constraint.py)* `top-level`
-- [SemanticDelta](SemanticDelta.md) *(from topology/model.py)* `top-level`
-- [SemanticRef](SemanticRef.md) *(from topology/model.py)* `top-level`
 - [SurfaceBoundary](SurfaceBoundary.md) *(from operators/geometry.py)* `top-level`
 - [SurfaceFillingSettings](SurfaceFillingSettings.md) *(from operators/geometry.py)* `top-level`
 - [add_arc_rsketch](add_arc_rsketch.md) *(from operators/sketch.py)* `top-level`
@@ -345,6 +347,7 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [add_revolute_constraint_rassembly](add_revolute_constraint_rassembly.md) *(from operators/product.py)* `top-level`
 - [and_](and_.md) *(from ql.py)* `submodule:ql`
 - [assign_material_rpart](assign_material_rpart.md) *(from operators/product.py)* `top-level`
+- [boolean_rsolidlist](boolean_rsolidlist.md) *(from operators/boolean.py)* `top-level`
 - [canonical_frame](canonical_frame.md) *(from product/placement.py)* `submodule:product/placement`
 - [capture](capture.md) *(from product/capture.py)* `top-level`
 - [constrain_angle_rsketch](constrain_angle_rsketch.md) *(from operators/sketch.py)* `top-level`
@@ -377,6 +380,7 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [constrain_symmetric_rsketch](constrain_symmetric_rsketch.md) *(from operators/sketch.py)* `top-level`
 - [constrain_tangent_rsketch](constrain_tangent_rsketch.md) *(from operators/sketch.py)* `top-level`
 - [constrain_vertical_rsketch](constrain_vertical_rsketch.md) *(from operators/sketch.py)* `top-level`
+- [draft_rsolid](draft_rsolid.md) *(from operators/features.py)* `top-level`
 - [explain_tag](explain_tag.md) *(from operators/selection.py)* `top-level`
 - [fill_holes_rshell](fill_holes_rshell.md) *(from operators/geometry.py)* `top-level`
 - [fit_point_grid_rface](fit_point_grid_rface.md) *(from operators/geometry.py)* `top-level`
@@ -388,12 +392,14 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [identity_placement_rplacement](identity_placement_rplacement.md) *(from operators/product.py)* `top-level`
 - [inspect_assembly_constraints_rconstraintreport](inspect_assembly_constraints_rconstraintreport.md) *(from operators/product.py)* `top-level`
 - [inspect_sketch_rsketchresult](inspect_sketch_rsketchresult.md) *(from operators/sketch.py)* `top-level`
+- [key](key.md) *(from ql.py)* `submodule:ql`
 - [linear_pattern_rsolidlist](linear_pattern_rsolidlist.md) *(from operators/transform.py)* `top-level`
 - [load_brep_region_rshell](load_brep_region_rshell.md) *(from operators/geometry.py)* `top-level`
 - [load_brep_region_rsolid](load_brep_region_rsolid.md) *(from operators/geometry.py)* `top-level`
 - [measure_constraint_residual_rconstraintresidual](measure_constraint_residual_rconstraintresidual.md) *(from operators/product.py)* `top-level`
 - [meta](meta.md) *(from ql.py)* `submodule:ql`
 - [not_](not_.md) *(from ql.py)* `submodule:ql`
+- [offset_rsolid](offset_rsolid.md) *(from operators/features.py)* `top-level`
 - [operation_event](operation_event.md) *(from ql.py)* `submodule:ql`
 - [or_](or_.md) *(from ql.py)* `submodule:ql`
 - [origin_role](origin_role.md) *(from ql.py)* `submodule:ql`
@@ -402,8 +408,11 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [placement_frame_mm](placement_frame_mm.md) *(from product/placement.py)* `submodule:product/placement`
 - [placement_from_canonical](placement_from_canonical.md) *(from product/placement.py)* `submodule:product/placement`
 - [placement_ticks](placement_ticks.md) *(from product/placement.py)* `submodule:product/placement`
+- [prop](prop.md) *(from ql.py)* `submodule:ql`
 - [radial_pattern_rsolidlist](radial_pattern_rsolidlist.md) *(from operators/transform.py)* `top-level`
+- [register_property_resolver](register_property_resolver.md) *(from ql.py)* `submodule:ql`
 - [render_screenshot_rpath](render_screenshot_rpath.md) *(from operators/features.py)* `top-level`
+- [scale_rsolid](scale_rsolid.md) *(from operators/transform.py)* `top-level`
 - [select](select.md) *(from ql.py)* `submodule:ql`
 - [set_public_connector_rassembly](set_public_connector_rassembly.md) *(from operators/product.py)* `top-level`
 - [sew_faces_rshell](sew_faces_rshell.md) *(from operators/geometry.py)* `top-level`
@@ -412,6 +421,7 @@ This index includes generated docs for the public SimpleCAD API surface, includi
 - [source_binding](source_binding.md) *(from ql.py)* `submodule:ql`
 - [source_topology](source_topology.md) *(from ql.py)* `submodule:ql`
 - [tag](tag.md) *(from ql.py)* `submodule:ql`
+- [transform_rsolid](transform_rsolid.md) *(from operators/transform.py)* `top-level`
 - [trim_surface_rface](trim_surface_rface.md) *(from operators/geometry.py)* `top-level`
 - [twisted_sweep_rsolid](twisted_sweep_rsolid.md) *(from operators/features.py)* `top-level`
 - [unground_component_rassembly](unground_component_rassembly.md) *(from operators/product.py)* `top-level`

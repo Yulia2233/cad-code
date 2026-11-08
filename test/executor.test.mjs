@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import {executeCode,stopWorkers,stopSession} from '../src/executor.mjs';
-import {sessionDir,ROOT} from '../src/paths.mjs';
+import {sessionDir,ROOT,SKILL} from '../src/paths.mjs';
 
 const prefix='ses_test_'+crypto.randomBytes(6).toString('hex');
 const created=[];
@@ -23,6 +23,35 @@ test('exec sequences dependent commands and retains JavaScript/source newlines',
   assert.equal(fs.readFileSync(path.join(dir,'输入.txt'),'utf8'),'圆柱 Ø12\nline two\n');
   const events=fs.readFileSync(path.join(dir,'.cad-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(events.find(e=>e.kind==='exec_start').code,code);
+});
+
+test('the skill scripts read IR and evaluate a notebook inside the sandbox, with no tool copies in the workspace',async()=>{
+  const {id,dir}=fixture('skill_cad_scripts');
+  assert.equal(fs.existsSync(path.join(dir,'tools')),false);
+  const nb=['# /// script','# dependencies = ["simplecadapi"]','#','# [tool.simplecadapi]','# id = "model"','# revision = "1.0.0"','# ///',
+    'import marimo','','app = marimo.App()','','with app.setup:','    import simplecadapi as scad','','',
+    '@app.cell','def _():','    # ---- feature: post (build) ----','    post = scad.make_cylinder_rsolid(radius=5.0, height=12.0)','    return (post,)','','',
+    '@app.cell','def _(post):','    model = scad.Part(part_id="model", body=post)','    return (model,)','','',
+    'if __name__ == "__main__":','    app.run()',''].join('\n');
+  fs.writeFileSync(path.join(dir,'model.py'),nb);
+  const scripts=path.join(SKILL,'scripts');
+  const command=[
+    `"$CAD_CODE_PYTHON" ${scripts}/stepeval.py model.py /dev/null --out eval/0 > /dev/null; true`,
+    `"$CAD_CODE_PYTHON" ${scripts}/stepir.py eval/0/candidate.step --out target.ir.jsonl`,
+    `"$CAD_CODE_PYTHON" ${scripts}/stepeval.py model.py eval/0/candidate.step --out eval/1`
+  ].join(' && ');
+  const result=await executeCode(id,`text(await tools.exec_command({cmd:${quoted(command)},yield_time_ms:30000,max_output_tokens:6000}));`);
+  assert.equal(result.error,undefined,result.output);let returned=JSON.parse(result.output),output=returned.output;
+  while(returned.session_id&&returned.exit_code===null){
+    const next=await executeCode(id,`text(await tools.write_stdin({session_id:${returned.session_id},yield_time_ms:1000,max_output_tokens:6000}));`);
+    returned=JSON.parse(next.output);output+=returned.output;
+  }
+  assert.equal(returned.exit_code,0,output);
+  const score=JSON.parse(output.trim().split('\n').filter(s=>s.startsWith('{')).at(-1));
+  assert.equal(score.ok,true,output);assert.equal(score.riou,1);assert.deepEqual(score.format,[]);
+  const ir=fs.readFileSync(path.join(dir,'target.ir.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(ir[0].types.CYL,1);assert.equal(ir[0].counts.face,3);assert.ok(Math.abs(ir[0].vol-Math.PI*25*12)<.01);
+  assert.equal(fs.existsSync(path.join(dir,'tools')),false);
 });
 
 test('Unicode remains intact when a multibyte character crosses stdout chunks',async()=>{
@@ -123,6 +152,45 @@ test('view_image emits a model-visible attachment without inserting base64 into 
   assert.equal(result.output,'rendered');assert.equal(result.attachments.length,1);
   assert.equal(result.attachments[0].mime,'image/png');
   assert.deepEqual(Buffer.from(result.attachments[0].url.split(',')[1],'base64'),png);
+});
+
+test('worker records the exact interleaved order of emitted text and original image content',async()=>{
+  const {id,dir}=fixture('ordered_media'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'preview.png'),png);
+  const result=await executeCode(id,'text("before");image(await tools.view_image({path:"preview.png",detail:"original"}));text("after");');
+  assert.deepEqual(result.content,[{type:'input_text',text:'before'},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'original'},{type:'input_text',text:'after'}]);
+  assert.equal(result.output,'before\nafter');
+  const events=fs.readFileSync(path.join(dir,'.cad-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.find(e=>e.kind==='exec_complete').content,result.content);
+});
+
+test('worker preserves emitted image evidence and ordering when a later tool action fails',async()=>{
+  const {id,dir}=fixture('failed_media'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'preview.png'),png);
+  const result=await executeCode(id,'text("before failure");image(await tools.view_image({path:"preview.png"}));throw Error("inspect failed");');
+  assert.equal(result.error,true);assert.deepEqual(result.content,[{type:'input_text',text:'before failure'},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64')},{type:'input_text',text:'Error: inspect failed'}]);
+});
+
+test('17 emitted images fail the budget visibly while retaining the first 16 images in exact order',async()=>{
+  const {id,dir}=fixture('image_budget'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'pixel.png'),png);
+  const result=await executeCode(id,'const r=await tools.view_image({path:"pixel.png",detail:"original"});for(let i=0;i<17;i++){text("image "+i);image(r);}');
+  assert.equal(result.error,true);assert.match(result.output,/ImageOutputBudgetExceeded/);assert.equal(result.attachments.length,16);
+  const expected=[];for(let i=0;i<16;i++){expected.push({type:'input_text',text:'image '+i},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'original'});}
+  expected.push({type:'input_text',text:'image 16'});
+  assert.deepEqual(result.content.slice(0,-1),expected);assert.match(result.content.at(-1).text,/ImageOutputBudgetExceeded/);
+  const events=fs.readFileSync(path.join(dir,'.cad-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.find(e=>e.kind==='exec_error').content,result.content);
+});
+
+test('URL-only image emission inherits view metadata, accepts explicit detail override, and read-only views emit nothing',async()=>{
+  const {id,dir}=fixture('image_detail'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9j0AAAAASUVORK5CYII=','base64');
+  fs.writeFileSync(path.join(dir,'source-preview.png'),png);
+  const emitted=await executeCode(id,'const r=await tools.view_image({path:"source-preview.png",detail:"original"});image(r.image_url);image(r.image_url,"low");');
+  assert.deepEqual(emitted.content,[{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'original'},{type:'input_image',image_url:'data:image/png;base64,'+png.toString('base64'),detail:'low'}]);
+  assert.deepEqual(emitted.attachments.map(x=>x.filename),['source-preview.png','source-preview.png']);
+  const readOnly=await executeCode(id,'await tools.view_image({path:"source-preview.png",detail:"original"});');
+  assert.deepEqual(readOnly.content,[]);assert.deepEqual(readOnly.attachments,[]);assert.equal(readOnly.error,undefined);
 });
 
 test('sandbox blocks shell reads/writes and symlink access to another workspace',async()=>{

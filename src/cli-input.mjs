@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {WORKSPACE,sessionDir} from './paths.mjs';
+import {prepareSessionWorkspace} from './workspace.mjs';
 
 function assertNoSymlinks(absolute) {
   const parsed=path.parse(absolute);let current=parsed.root;
@@ -41,7 +42,7 @@ export function importFiles(sessionID,paths,{maxBytes=32*1024*1024}={}) {
       const stat=fs.fstatSync(fd);if(!stat.isFile())throw Error('Input must be a regular file: '+original);
       if(stat.size>maxBytes)throw Error(`Input exceeds ${Math.round(maxBytes/1024/1024)} MiB: ${path.basename(absolute)}`);
     }
-    secureDirectory(WORKSPACE);secureDirectory(work);const input=path.join(work,'input');secureDirectory(input);
+    secureDirectory(WORKSPACE);secureDirectory(work);prepareSessionWorkspace(sessionID);const input=path.join(work,'input');secureDirectory(input);
     for(const source of sources){
       const target=destination(input,path.basename(source.absolute));created.push(target.absolute);
       try{

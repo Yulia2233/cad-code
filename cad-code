@@ -1,3 +1,8 @@
 #!/bin/sh
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Node's fetch ignores HTTP(S)_PROXY unless asked; the model gateway is only reachable through the proxy on this machine
+# (localhost stays direct through NO_PROXY).
+if [ -n "${HTTPS_PROXY}${HTTP_PROXY}${https_proxy}${http_proxy}" ] && [ -z "${NODE_USE_ENV_PROXY}" ]; then
+  export NODE_USE_ENV_PROXY=1
+fi
 exec node "$SCRIPT_DIR/src/cli.mjs" "$@"

@@ -4,9 +4,9 @@ description: Build, assemble, inspect, reconstruct, and export parametric CAD mo
 license: Apache-2.0
 metadata:
   project: simplecadapi
-  version: 2.2.5
+  version: 2.2.7
   package-name: simplecadapi
-  package-version: 2.2.5
+  package-version: 2.2.7
 ---
 
 # SimpleCAD SDK Skill
@@ -33,8 +33,10 @@ Paths are relative to this file's directory.
    trigger fires.
 5. Before the first call of any API, read its exact page
    (`references/docs/api/<name>.md`, `references/docs/stdlib/<name>.md`,
-   `references/docs/core/<type>.md`). A method absent from its page
-   does not exist, however plausible it looks.
+   `references/docs/core/<type>.md`), unless the selected workflow
+   quotes its verified signature (its API card counts as the page). A
+   method absent from its page does not exist, however plausible it
+   looks.
 
 - You MUST NOT read the full API or stdlib index up front; the workflow
   names every page its steps need.
@@ -67,7 +69,7 @@ Read exactly one workflow first, per the user's goal:
 | --- | --- |
 | Model one physical part | `references/workflows/single-part-modeling.md` |
 | Multi-part product or mechanism (custom parts, stdlib gears/bearings, connectors, constraints, package) | `references/workflows/assembly-product-build.md` |
-| Rebuild an editable model from a STEP file | `references/workflows/step-reconstruction.md` |
+| Rebuild an editable model from a STEP file (STEPIR + one evaluation script) | `references/workflows/step-reconstruction.md` |
 | Export/translate a validated package | `references/workflows/export-and-translation.md` |
 | Produce a GB engineering drawing (DXF) from validated geometry | `references/workflows/engineering-drawing.md` |
 | Rebuild a 3D model from a vector-PDF engineering drawing | `references/workflows/drawing-reconstruction.md` |
@@ -90,7 +92,9 @@ it and stop that route; never invent an alternative route.
 ## Global rules (every task)
 
 1. Refine the requirement into a brief before modeling
-   (`references/domains/requirement-refinement.md`).
+   (`references/domains/requirement-refinement.md`). In STEP
+   reconstruction the target STEP is the brief; the workflow's plan
+   step replaces this file.
 2. Use keyword arguments for every documented public API and
    stdlib function, except the canonical durable export call
    `capture(result, path)`, whose two required arguments are
@@ -108,7 +112,11 @@ it and stop that route; never invent an alternative route.
    boundary comment `# ---- feature: <slug> (<role>) ----`; 2D
    profiles and planar paths go through the sketch API, primitives
    only when the shape is completely contained in the basic form.
-4. Booleans (`union_rsolid`, `cut_rsolid`, `intersect_rsolid`)
+   Where the cell boundaries go and which numbers are a `var()`
+   follow `references/discipline/notebook-cell-design.md`: read it
+   with the convention before writing any notebook; it states each rule
+   with its reason and the error you get when you break it.
+4. Booleans (`union_rsolid`, `cut_rsolid`, `cut_rsolid_list`, `intersect_rsolid`)
    accept mixed inputs and return exactly one `Solid`; union
    defaults to `glue=False` with a conservative scale-relative
    tolerance and fails explicitly when it cannot produce one
@@ -144,12 +152,16 @@ it and stop that route; never invent an alternative route.
     `scad.std.bearing`.
 11. Read `references/docs/guides/notebook-runtime.md` in full
     before writing a notebook, composing notebooks, or reasoning
-    about the cell cache. Run models with `sca run` (`sca edit` opens
+    about the cell cache. Exception: STEP reconstruction, whose
+    workflow carries the complete single-part notebook contract; do not
+    read this guide, the feature-tree convention, or the cell-design
+    discipline for that task. Run models with `sca run` (`sca edit` opens
     them in the editor for a person); never enable
     marimo's `[tool.marimo.runtime] cache_cells` in the editor, and
     never commit the generated `__marimo__/` directory.
-12. Manage the modeling project the way software is managed: put the
-    workspace under git from the first file, commit at verified
+12. Manage the modeling project the way software is managed (not for a
+    one-part STEP reconstruction, whose evaluation runs are its record):
+    put the workspace under git from the first file, commit at verified
     milestones (a passed verification, not a wall clock) with messages
     that say what changed and why, and use a branch per design
     direction when alternatives are on the table. Generated state —
@@ -208,8 +220,11 @@ print(len(rebuilt))
 - `references/workflows/` — goal-oriented workflows, including drawing reconstruction
 - `references/domains/` — capability domains, including drawing inspection
 - `references/discipline/` — modeling knowledge and invariants
+- `references/discipline/verifier-scripts.md` — writing a verifier script (OCP through `simplecadapi.verify`)
 - `references/SDK_OVERVIEW.md` — package-level map
 - `references/inspect/brep-reverse-engineering.md`
+- `references/inspect/stepir.md` — STEPIR v6.3: the compact IR of a target STEP, how to read it, how it maps to code
+- `scripts/stepir.py`, `scripts/stepeval.py` — STEP → IR (plus on-demand queries); notebook-vs-target evaluation
 - `references/domains/addon-development.md` — `sca` addon CLI and authoring guide
 - `references/domains/editor-collaboration.md` — working with a person in `sca edit`:
   selection cell, snapshot, cell references, `sca cell` / `sca new`, parameters

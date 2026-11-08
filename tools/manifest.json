@@ -1,0 +1,15 @@
+{
+  "date": "2026-11-05",
+  "source": "STEP reverse-engineering training project research/tools",
+  "original_root": "/Users/liuyu/Documents/auto-research/step-8B-sft/research/tools",
+  "files": {
+    "cadeval.py": "ce43750aedff2cd4e2c2eca3948f5e9fdeb840ada175731a066c221454b4a23f",
+    "cadthreads.py": "b46590c82f7cdcd71ac61b8374ac84922f9620a9908880dcb9a72f1bbf5601f2",
+    "robust_iou.py": "4a95f5740c461806374c75190645b1bfa1b4798552a341336191c31b1eae40fe",
+    "frozen/compare.py": "12c7b740934dba8db61b0743f91f6aab3160e4a47f1b18c783f8a027cb93e7ad"
+  },
+  "runtime_sdk": "2.2.7",
+  "historical_metrics_sdk": "2.1.4",
+  "updated": "2026-11-07: sessions get no tool copies; the CAD scripts are the skill's (skills/simplecadapi/scripts/stepir.py, stepeval.py). cad.py, families_common.py, stepir.py, stepeval.py moved to .runtime/tools-backup/",
+  "purpose": "scorer support for bench_cli only (strict + robust IoU of plain build() modules); not copied into sessions"
+}
