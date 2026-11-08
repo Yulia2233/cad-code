@@ -440,6 +440,6 @@
     "references/workflows/single-part-modeling.md": "260f7ed43d25c36ff04635c6e2e4792d6b51093dd968097a54de0f9a09908d5c",
     "references/workflows/step-reconstruction.md": "8687fb56aaa80e1b5ca5f23888bf06961600cda425f8ed670ac2c2798424ba63",
     "scripts/stepeval.py": "2e7ee261ae5a1c06ce7cd45c9fd16334447687270794ede33e46f34e73e06f1e",
-    "scripts/stepir.py": "aa8e5d291c6a4ce75779858b3bf61356ae40e5799aea924c9e7180ea366b228d"
+    "scripts/stepir.py": "bce850d29452142f8e54387d8a4a7c820ced744fb61aa3e953b71c8aa4bb371c"
   }
 }
