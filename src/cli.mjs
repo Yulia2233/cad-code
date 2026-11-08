@@ -72,7 +72,7 @@ if(inputFiles.length){
   else if(pass.includes('--continue')){const list=await oc('/session');sessionID=list.filter(x=>!x.parentID).sort((a,b)=>b.time.updated-a.time.updated)[0]?.id;if(!sessionID)throw Error('No previous session');pass.splice(pass.indexOf('--continue'),1);pass.push('--session',sessionID);}
   else{const s=await oc('/session','POST',{title:'CAD 输入 · '+path.basename(inputFiles[0])});sessionID=s.id;pass.push('--session',sessionID);}
   const imports=importFiles(sessionID,inputFiles);console.log('输入已复制到 '+path.join(WORKSPACE,sessionID)+': '+imports.join(', '));
-  if(mode==='run')pass.push('\n本次输入文件已复制到会话工作区：'+imports.join(', ')+ '。请使用这些相对路径。');
+  if(mode==='run')pass.push('\nThe input files have been copied to the session workspace: '+imports.join(', ')+ '. Use these relative paths.');
 }
 console.log('\n  CAD Code · '+(connection.model||'qwen-v8')+' · SimpleCADAPI2.2.7 · 思考'+(connection.thinking===false?'关闭':'开启')+'\n  exec(code) · 本地CAD工作区 · Ctrl+C/Esc 按OpenCode界面操作\n');
 const env={...process.env,OPENCODE_SERVER_PASSWORD:connection.password,OPENCODE_SERVER_USERNAME:'opencode',OPENCODE_CONFIG:path.join(RUNTIME,'opencode.json'),OPENCODE_CONFIG_DIR:path.join(RUNTIME,'xdg/config'),XDG_CONFIG_HOME:path.join(RUNTIME,'xdg/config'),XDG_DATA_HOME:path.join(RUNTIME,'xdg/data'),XDG_STATE_HOME:path.join(RUNTIME,'xdg/state'),XDG_CACHE_HOME:path.join(RUNTIME,'xdg/cache'),OPENCODE_DISABLE_CLAUDE_CODE:'true'};
