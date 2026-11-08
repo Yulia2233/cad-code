@@ -1,4 +1,4 @@
-# STEPIR v6.2: reading the IR of a target STEP
+# STEPIR v6.3: reading the IR of a target STEP
 
 `scripts/stepir.py` turns a STEP part into a compact description, one JSON
 object per line: a header, one record per face, then derived lines computed from
@@ -8,7 +8,7 @@ rules for turning it into SimpleCAD code.
 
 ```bash
 python scripts/stepir.py target.step --out target.ir.jsonl   # full IR (skip when target.ir.jsonl is supplied)
-python scripts/stepir.py query target.step face 12           # on demand, one face (spline control net included)
+python scripts/stepir.py query target.step face 12           # on demand, one face (exact carrier: spline net, REV/EXT generator)
 python scripts/stepir.py query target.step axis              # coaxial faces with their exact (z, r) meridian
 python scripts/stepir.py query target.step neighbours 12     # adjacent faces and the shared tangent length
 python scripts/stepir.py query target.step evidence 12       # which rigid motions sweep the face
@@ -28,7 +28,10 @@ literals).
 - `solids` must be 1. More than one solid is out of scope: report it and stop.
 - `types` counts faces after recognition: a B-spline face that is really a
   plane, cylinder, cone, sphere or torus is counted (and written) as that.
-- `implied` = prism side faces that have no record (see `ext`).
+- `implied` = side faces that have no record: walls of a prism (`ext`) or of a
+  loop prism (`prism`), rebuilt from the loop they sweep.
+- `relief` (only when present) = `{"faces":N,"types":{...}}`: faces that only
+  carry shallow lettering, logos or imprinted labels (see the `relief` lines).
 - `vol`, `area`, `bbox` are what the finished candidate must reproduce.
 
 ## Face records
@@ -59,7 +62,8 @@ Loops are in the local frame, outer boundary first:
 | `["L",u,v]` | line to `(u,v)` |
 | `["A",cu,cv,u,v,s]` | arc to `(u,v)` about centre `(cu,cv)`; `s=+1` counter-clockwise, `s=-1` clockwise |
 | `["E",cu,cv,a,b,ux,uy,u,v,s]` | elliptical arc (semi-axes `a`,`b`, major axis direction `(ux,uy)`) |
-| `["S",deg,u,v,[mu,mv]]` | spline to `(u,v)`; `[mu,mv]` is its centroid. Exact poles: `query face <id>` |
+| `["B",deg,[[u1,v1],...,[u,v]]]` | exact B-spline to `(u,v)`: its poles after the start (the last is the end); a 4th entry `{"k":knots,"m":multiplicities,"w":weights}` when it is not a single Bezier span. Sketch it with `add_bspline_rsketch(..., control_points=[start] + poles, degree=deg, knots=k, multiplicities=m, weights=w)` |
+| `["S",deg,u,v,[mu,mv]]` | long spline to `(u,v)`, short form: `[mu,mv]` is its centroid. Exact poles: `query face <id>` of the wall next to it |
 | `{"c":[cu,cv,r]}` | a full circle |
 | `"rect":[u0,v0,u1,v1]` | the face is one axis-aligned rectangle (replaces `loops`) |
 
@@ -85,6 +89,21 @@ Holes in a cap (inner loops) belong to the same prism when the hole walls are
 implied too; a hole whose wall has its own record (a `CYL` with `cc:0`) is a
 separate feature (a bore), usually cut later.
 
+### Loop prisms: `prism`, `same`
+
+`"prism":[[i,k,dz],...]` on a plane: loop `i` of this face, swept by `dz` along
+this face's `n`, lands on face `k`, and every wall in between is a straight
+sweep of that loop's segments, so the walls have no records (they are counted in
+`implied`). Face `k` writes its copy of the loop as `{"same":[id,i]}` (the same
+outline, moved along the normal). This is how bosses, pockets, through cuts and
+extruded lettering appear when the two faces are not a full `ext` prism pair.
+The loops of a `prism` entry are always exact (`B` segments, never `S`).
+
+- Material or empty: the swept region is material when loop `i` is the face's
+  outer loop (index 0) and `dz < 0`, or an inner loop and `dz > 0` (a boss on the
+  face); otherwise it is empty (a pocket or a through cut).
+- Several loops with the same `k` and `dz` are one sketch and one extrude/cut.
+
 ### Curved faces
 
 | `t` | Fields |
@@ -94,7 +113,7 @@ separate feature (a bore), usually cut later.
 | `SPHERE` | `p` centre, `r`, `v` latitude range (deg) |
 | `TORUS` | `p` centre of the tube circle, `d` axis, `r` major radius, `r2` tube radius, `v` tube-section angle range |
 | `REV` | surface of revolution: `p`, `d`, and `gen` = exact generator in the meridian plane (`zr` poles: z along `d` from `p`, r away from the axis; `deg`, `knots`, `mult`, optional `w`, `periodic`). Build it with `make_spline_redge` and revolve |
-| `EXT` | linear extrusion of `gen` (3D poles) along `d` over `v` |
+| `EXT` | linear extrusion of `gen` (3D poles) along `d` over `v`. B-spline faces that are exactly a straight extrusion of one curve (walls of extruded spline outlines, text, gear flanks) are written as `EXT` too |
 | `BSPL` | a genuine free-form face: `bb`, `deg`, `poles` (counts), 3D loops. The full net: `query face <id>`; how it was made: the `op` lines |
 
 `span > 360` cannot happen: a face winding round more than once has `span:360`
@@ -114,6 +133,7 @@ Computed from the geometry, not guessed. Ids are IR ids.
 {"derived":"op","op":"loft","faces":[...],"sections":[...]}
 {"derived":"freeform","faces":[...]}
 {"derived":"axis","dir":[...],"point":[...],"faces":[...]}
+{"derived":"relief","kind":"emboss|engrave|imprint","on":id,"h":H,"faces":[...],"walls":N,"loops":N}
 ```
 
 - **fillet / chamfer**: one line = one operation. Face `faces[i]` rounds the
@@ -141,6 +161,13 @@ Computed from the geometry, not guessed. Ids are IR ids.
 - **freeform**: no rigid motion makes these faces; they come from a loft, a
   sweep along a curve, or a spline surface. Do not try to extrude them.
 - **axis**: faces sharing one axis (revolve candidates).
+- **relief**: shallow lettering, a logo or a label on face `on`, raised
+  (`emboss`), sunk (`engrave`) by `h`, or `imprint` (a face drawn onto `on` with
+  no depth). `faces` are its tops / floors / patches, `walls` the number of its
+  implied walls, `loops` the number of its outlines. On a plane its outlines are
+  the `prism` loops (exact); on a curved face they are not in the base IR (only
+  `query face`). Relief faces may be left out of a reconstruction: the
+  evaluation does not count them as missing.
 
 ## Caveats
 
@@ -157,4 +184,5 @@ Computed from the geometry, not guessed. Ids are IR ids.
 - The IR rounds to 4 decimals; small mismatches against the target of about
   1e-4 are expected and are not errors.
 - Do not query faces you already understand. `query face` is for splines and for
-  the faces a comparison points at.
+  the faces a comparison points at; it also takes the id of an implied wall (a gap
+  in the ids) and returns that wall's exact carrier.

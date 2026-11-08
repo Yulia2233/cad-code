@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "source": "PhySpace/SimpleCADAPI release/2.2.7 + STEP reconstruction workflow (STEPIR v6.2.2, stepeval), opencode build",
   "files": {
-    "SKILL.md": "8948a0e23b846a22d37abfd4871673a38e83afff923e62f3614e8a20de6de76b",
+    "SKILL.md": "e346f583e86dccc3e8879c75e349e39fd5f1b2e671b730064533f41f8869ca79",
     "references/LICENSE.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
     "references/README.md": "a2b6e3c0d712781b3f5ee19dd6a62ac44f9babc71e57699fbe11fea70991e4e3",
     "references/SDK_OVERVIEW.md": "dabce98dd47a36b4a4d4808b46c7165e472a12ca59b48dcfb0292c6b54c4da05",
@@ -430,7 +430,7 @@
     "references/domains/standard-parts.md": "ce84b140108da2a3ffb4423caabf6aec8608705cbb938bbd0107d0d7b12c4a9c",
     "references/domains/step-inspection.md": "6ba76b17ff68d7b991ef83a621a6fee0eacfe0273c4458f837a2041ae3eb0a19",
     "references/inspect/brep-reverse-engineering.md": "2b1635d6504861efd26fc9acc6bf3adc774dc28d4e4afc4af03943b39b2513de",
-    "references/inspect/stepir.md": "d73126c58f009fc42f46ab0c5caa0d9ac62c76d928ae4e2767f00cdd7d162b65",
+    "references/inspect/stepir.md": "db040820531e90b41881369b742f87fed62a4e0668dcc79eff0a0ecfc38bf277",
     "references/ql-playbook.md": "75bcb2d720d998658ebc45674fa683bc2519da4551b014766bcaf38f411caa1c",
     "references/scadpkg-format.md": "c53049f6ec1387c26450c6bf40d63d7eb6250f739f8f7afaac8edc04579704b0",
     "references/workflows/assembly-product-build.md": "1e7eee8b827f92a8b7ae198dc26084ce73228e944d25cb6b70652c3108ef3572",
@@ -438,8 +438,8 @@
     "references/workflows/engineering-drawing.md": "fa5fa3f79f2c7ea16d3da9cd5ba85ff9b296d6d7e6a95532eb1a9cd02a4da17a",
     "references/workflows/export-and-translation.md": "736fd38d3c7f649f54bf9e9f50aba0acf6d3be5d4e598bba4ceac35f1dc64255",
     "references/workflows/single-part-modeling.md": "260f7ed43d25c36ff04635c6e2e4792d6b51093dd968097a54de0f9a09908d5c",
-    "references/workflows/step-reconstruction.md": "98304d21b816900cf5a714ff13ce8021f5e997ea9df20628987e6a6cf11d4440",
-    "scripts/stepeval.py": "c095b604f4e14cc2961da42d1fae1abd87cfbf6d16b6e09127d725b034f50bdf",
-    "scripts/stepir.py": "2a923b5fda94a974c3cfb229f18477ddef62880dbb8fe41076a54cb56fb26d59"
+    "references/workflows/step-reconstruction.md": "8687fb56aaa80e1b5ca5f23888bf06961600cda425f8ed670ac2c2798424ba63",
+    "scripts/stepeval.py": "2e7ee261ae5a1c06ce7cd45c9fd16334447687270794ede33e46f34e73e06f1e",
+    "scripts/stepir.py": "aa8e5d291c6a4ce75779858b3bf61356ae40e5799aea924c9e7180ea366b228d"
   }
 }

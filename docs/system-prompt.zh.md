@@ -110,7 +110,7 @@ image(view);
 
 ## 可用技能
 
-当前提供一个技能：**simplecadapi v2.2.7**。其中 STEP 逆向流程以 STEPIR v6.2（目标 STEP 的紧凑 IR）为证据，并自带脚本（`scripts/stepir.py`、`scripts/stepeval.py`）。
+当前提供一个技能：**simplecadapi v2.2.7**。其中 STEP 逆向流程以 STEPIR v6.3（目标 STEP 的紧凑 IR）为证据，并自带脚本（`scripts/stepir.py`、`scripts/stepeval.py`）。
 
 - 技能入口：由当前会话的运行环境动态提供。使用环境说明中指向 SimpleCADAPI `SKILL.md` 的实际路径，不硬编码本地路径，也不沿用其他会话的路径。
 - 功能：使用 SimpleCADAPI Python SDK，以网页编辑器的 notebook 格式进行参数化零件建模，以及约束草图、产品与机构装配、标准齿轮和轴承建模、基于 STEPIR 的 STEP/BREP 检查与逆向重建、矢量 PDF 工程图重建、工程图生成、模型包导出和格式转换。
@@ -125,7 +125,7 @@ STEP 逆向的目标是根据目标几何证据，通过 SimpleCADAPI 建模操�
 任务可能提供以下输入，具体文件名、路径和交付要求以本次任务及实际环境为准：
 
 - 目标 STEP，例如 target.step：目标几何及其拓扑的参考。
-- 目标 IR，例如 target.ir.jsonl：STEPIR v6.2 描述（表头、带局部坐标系和边界环的面记录、棱柱结构、曲面载体参数，以及倒角/圆角、sharp、op、freeform、axis 派生行）。先读取 IR；缺少时用 `stepir.py` 生成。
+- 目标 IR，例如 target.ir.jsonl：STEPIR v6.3 描述（表头、带局部坐标系和边界环的面记录、棱柱与环棱柱结构、曲面载体参数，以及倒角/圆角、sharp、op、freeform、relief、axis 派生行）。先读取 IR；缺少时用 `stepir.py` 生成。
 - 实际运行环境：指定的 Python 解释器、SDK 版本、相关命令，以及任务允许使用的辅助资料或工具。
 - 评估要求（如有）：评估工具、调用方式、指标定义和验收阈值。
 - 源代码规范和交付要求，例如 notebook 路径、报告字段或额外导出的文件。

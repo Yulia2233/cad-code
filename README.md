@@ -1,6 +1,6 @@
 # CAD Code
 
-基于 **OpenCode** 的本地 CAD Agent，提供终端 CLI 和网页两种交互方式。默认使用 **Qwen v8**（`qwen-v8`）、完整 **SimpleCADAPI 2.2.7 skill**（含按 STEPIR v6.2 重写的 STEP 逆向流程），执行真实建模、检查、STEP/STL 导出和渲染。
+基于 **OpenCode** 的本地 CAD Agent，提供终端 CLI 和网页两种交互方式。默认使用 **Qwen v8**（`qwen-v8`）、完整 **SimpleCADAPI 2.2.7 skill**（含按 STEPIR v6.3 重写的 STEP 逆向流程），执行真实建模、检查、STEP/STL 导出和渲染。
 
 ## 现在体验
 

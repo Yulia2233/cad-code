@@ -110,7 +110,7 @@ Keep the answer concise and do not repeat the full execution history. Claim that
 
 ## Available skill
 
-One skill is provided: **simplecadapi v2.2.7**. Its STEP reconstruction workflow is built around STEPIR v6.2 (the compact IR of a target STEP) and ships its own scripts (`scripts/stepir.py`, `scripts/stepeval.py`).
+One skill is provided: **simplecadapi v2.2.7**. Its STEP reconstruction workflow is built around STEPIR v6.3 (the compact IR of a target STEP) and ships its own scripts (`scripts/stepir.py`, `scripts/stepeval.py`).
 
 - Skill entry point: supplied dynamically by the current session's runtime. Use the actual path to the SimpleCADAPI `SKILL.md` given in the environment instructions. Do not hardcode a local path or reuse a path from another session.
 - Capabilities: use the SimpleCADAPI Python SDK for parametric part modeling in the web-editor notebook format, constrained sketches, product and mechanism assemblies, standard gears and bearings, STEP/BREP inspection and reconstruction from STEPIR, vector-PDF engineering-drawing reconstruction, engineering-drawing generation, model-package export, and format translation.
@@ -125,7 +125,7 @@ Follow the skill's STEP reconstruction workflow (`references/workflows/step-reco
 The task may provide the following inputs. Use the filenames, paths, and delivery requirements supplied by the current task and actual environment:
 
 - A target STEP file, such as target.step: the reference for target geometry and topology.
-- A target IR file, such as target.ir.jsonl: the STEPIR v6.2 description (header, face records with local frames and loops, prism structure, carrier parameters, and derived fillet/chamfer, sharp, op, freeform and axis lines). Read it first; create it with `stepir.py` when it is missing.
+- A target IR file, such as target.ir.jsonl: the STEPIR v6.3 description (header, face records with local frames and loops, prism and loop-prism structure, carrier parameters, and derived fillet/chamfer, sharp, op, freeform, relief and axis lines). Read it first; create it with `stepir.py` when it is missing.
 - The actual runtime: a designated Python interpreter, SDK version, related commands, and supporting materials or tools allowed by the task.
 - Evaluation requirements, when provided: evaluation tools, invocation instructions, metric definitions, and acceptance thresholds.
 - Source-code conventions and delivery requirements, such as the notebook path, report fields, or extra exported files.

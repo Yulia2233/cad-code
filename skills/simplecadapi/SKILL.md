@@ -223,7 +223,7 @@ print(len(rebuilt))
 - `references/discipline/verifier-scripts.md` — writing a verifier script (OCP through `simplecadapi.verify`)
 - `references/SDK_OVERVIEW.md` — package-level map
 - `references/inspect/brep-reverse-engineering.md`
-- `references/inspect/stepir.md` — STEPIR v6.2: the compact IR of a target STEP, how to read it, how it maps to code
+- `references/inspect/stepir.md` — STEPIR v6.3: the compact IR of a target STEP, how to read it, how it maps to code
 - `scripts/stepir.py`, `scripts/stepeval.py` — STEP → IR (plus on-demand queries); notebook-vs-target evaluation
 - `references/domains/addon-development.md` — `sca` addon CLI and authoring guide
 - `references/domains/editor-collaboration.md` — working with a person in `sca edit`:

@@ -15,7 +15,9 @@ Prints ONE JSON line (the full report is also written to <out>/eval.json):
                 pieces of one surface merged, B-splines that are analytic recognised), so how an exporter split
                 faces does not matter; faces_raw has the plain B-rep counts for reference
   complete      face count within 10 % (or 2) of the target's and every surface type at >= 80 % of its count:
-                a missing fillet/chamfer group or detail shows up here even when riou is already high
+                a missing fillet/chamfer group or detail shows up here even when riou is already high. Faces that only
+                carry shallow lettering, logos or imprinted labels (the target IR header's "relief") may be left out:
+                complete is then also true when the counts match the target without them, and relief_omitted is true
   missing       up to 5 regions that the TARGET has and the candidate lacks: {"vol", "centroid", "bbox"}
   extra         up to 5 regions that the CANDIDATE has and the target lacks
 The candidate STEP is written to <out>/candidate.step. The target is read only here, never by the notebook.
@@ -189,7 +191,7 @@ def ir_header(step, timeout=900):
     if r.returncode != 0 or not r.stdout.strip():
         raise RuntimeError((r.stderr or "stepir produced no output").strip().splitlines()[-1][:200])
     head = json.loads(r.stdout.splitlines()[0])
-    return head["counts"]["face"], head.get("types", {})
+    return head["counts"]["face"], head.get("types", {}), head.get("relief")
 
 
 def sdk_solid(path):
@@ -244,14 +246,21 @@ def compare(target, cand):
     raw = {"target": st["face_count"], "candidate": sc["face_count"],
            "types_target": st.get("surface_type_statistics"), "types_candidate": sc.get("surface_type_statistics")}
     try:
-        (ft, yt), (fc, yc) = ir_header(target), ir_header(cand)
+        (ft, yt, rt), (fc, yc, _) = ir_header(target), ir_header(cand)
         faces = {"target": ft, "candidate": fc, "types_target": yt, "types_candidate": yc, "counted": "stepir"}
+        if rt:
+            faces["relief_target"] = rt
     except Exception as e:  # noqa: BLE001 - fall back to the plain B-rep counts, and say so
         faces = {**raw, "counted": "brep", "stepir_error": f"{type(e).__name__}: {str(e)[:200]}"}
     return {"faces": faces, "faces_raw": raw, "riou": round(inter / (va + vb - inter), 5) if va + vb - inter > 0 else 0.0,
             "vol_err": round(abs(vb - va) / max(va, 1e-12), 5),
             "bbox_err": round(bbox_err, 4) if bbox_err is not None else None,
             "missing": regions(a - b, centre), "extra": regions(b - a, centre)}
+
+
+def counts_match(nt, nc, tt, tc):
+    """Face count within 10 % (or 2) of the target's and every target surface type at >= 80 % of its count."""
+    return abs(nc - nt) <= max(2, 0.1 * nt) and all(tc.get(k, 0) >= 0.8 * v for k, v in tt.items())
 
 
 # ------------------------------------------------------------------------------------------------------------ main
@@ -285,8 +294,12 @@ def main():
     f = rep.get("faces")
     if f:
         tt, tc = f.get("types_target") or {}, f.get("types_candidate") or {}
-        rep["complete"] = (abs(f["candidate"] - f["target"]) <= max(2, 0.1 * f["target"])
-                           and all(tc.get(k, 0) >= 0.8 * v for k, v in tt.items()))
+        rep["complete"] = counts_match(f["target"], f["candidate"], tt, tc)
+        rel = f.get("relief_target")
+        if not rep["complete"] and rel:
+            tr = {k: v - rel["types"].get(k, 0) for k, v in tt.items()}
+            if counts_match(f["target"] - rel["faces"], f["candidate"], {k: v for k, v in tr.items() if v > 0}, tc):
+                rep["complete"] = rep["relief_omitted"] = True
     rep["ok"] = (not rep["format"] and rep["run"] == "ok" and rep.get("solids") == 1
                  and rep.get("riou", 0) >= RIOU_PASS and rep.get("complete", False))
     rep["candidate_step"] = str(out / "candidate.step") if rep["run"] == "ok" else None

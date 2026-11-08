@@ -74,6 +74,8 @@ references it depends on. Map regions to operations:
 |---|---|
 | plane with `ext` (no `cut`) | sketch the cap's loops on its frame, extrude along `-n` by `h` |
 | plane with `ext` and `cut:1` | sketch the loops, cut the prism extruded along `+n` by `h` |
+| plane with `"prism":[[i,k,dz],...]` | loop `i` swept by `dz` along `n` onto face `k` (whose copy of the loop reads `{"same":[id,i]}`): material (add: body, boss) when the loop is the outer loop and `dz < 0` or an inner loop and `dz > 0`, otherwise empty (subtract: pocket, through cut); loops with the same `k` and `dz` are one sketch and one feature |
+| `relief` line | lettering / logo / imprinted label on face `on`: `prism` loops on a plane are exact (extrude them as one feature, after the body); on a curved face (no loops in the IR) or `kind:"imprint"`, leave it out and say so in the report |
 | `axis` line, coaxial `CYL`/`CONE`/`TORUS`/`SPHERE`, `op revolve`, `REV` | one revolve: sketch the meridian (`query axis` gives it exactly) in a plane containing the axis |
 | full `CYL` with `cc:0` not covered by a prism | a bore: cylinder tool, cut (overshoot both ends) |
 | `op sweep` / `op loft` / `helix` | sweep or loft from the given rail/profile/sections |
@@ -84,7 +86,7 @@ references it depends on. Map regions to operations:
 
 Order: base solid → additive features → cuts → shells → fillets/chamfers.
 Every face record must be explained by some feature (implied faces come with
-their prism). Write the list into `report.json` under `"features"` at the end;
+their prism or loop prism; faces of a `relief` line may be left out). Write the list into `report.json` under `"features"` at the end;
 do not create other planning files.
 
 ### 3. Write the notebook body (one file write)
@@ -335,6 +337,7 @@ scad.revolve_rsolid(profile, axis=(0, 0, 1), angle=360, origin=(0, 0, 0))
 scad.sweep_rsolid(profile, path, is_frenet=False)
 scad.loft_rsolid(profiles, ruled=False)
 scad.make_helix_rwire(pitch, height, radius, center=(0, 0, 0), dir=(0, 0, 1), *, handedness="Right")
+scad.add_bspline_rsketch(sketch, entity_id, start, end, control_points, degree=3, knots=None, multiplicities=None, weights=None)   # control_points include both ends
 scad.make_spline_redge(*, control_points, degree=3, knots=None, multiplicities=None, weights=None, periodic=False)
 scad.make_interpolated_spline_redge(*, points, periodic=False)
 scad.make_wire_from_edges_rwire(edges)
@@ -367,6 +370,17 @@ plus `add_circle_rsketch`. A `rect` is four points and four lines.
 **Prism from `ext`.** Sketch on the cap's frame, `extrude_rsolid(direction=-n,
 distance=h)`; with `cut:1`, `direction=+n` and cut the result from the body.
 A sketch plane may be the cap itself even when the prism grows from it.
+
+**Loop prism from `prism`.** `[i, k, dz]` on a plane: sketch loop `i` on that
+plane's frame and extrude it by `|dz|` along `n` (`dz > 0`) or `-n` (`dz < 0`).
+The swept region is material when the loop is the face's outer loop (index 0)
+and `dz < 0`, or an inner loop and `dz > 0` (a boss standing on the face);
+otherwise it is empty (a pocket, a through hole): union or cut. Loops with
+the same `k` and `dz` go into one sketch (`inner_profiles` for nested ones) and
+one feature. Spline segments `["B",deg,[poles...]]` become
+`add_bspline_rsketch(sketch, entity_id, start, end, control_points=[start] + poles,
+degree=deg)` with `knots=k, multiplicities=m` (and `weights=w`) when the segment
+has the `{"k","m","w"}` entry; start and end are the point ids of the segment ends.
 
 **Revolve.** Choose a plane that contains the axis: origin = axis point, `x_axis`
 ⟂ axis, `y_axis` = axis direction; the meridian `(r, z)` points become `(u, v)`
