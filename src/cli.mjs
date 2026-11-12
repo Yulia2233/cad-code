@@ -8,6 +8,9 @@ import {configureCLI} from './config-cli.mjs';
 import {savedProviderFile} from './provider-config.mjs';
 import {parseDataCommand,manageCLI} from './data-cli.mjs';
 const argv=process.argv.slice(2);
+// BEGIN MULTISOLID ADDITIVE ENTRY
+if(await (await import('../multi/ingress.mjs')).routeCLI(argv)) process.exit(0);
+// END MULTISOLID ADDITIVE ENTRY
 if(argv[0]==='ask'){
   try{const {askCLI}=await import('./ask-cli.mjs');await askCLI(argv.slice(1));}
   catch(e){console.error(e.message);process.exitCode=e.exitCode||1;}

@@ -1,0 +1,54 @@
+# Multi-solid reconstruction and assembly
+
+This extension keeps STEPIR v6.3, SimpleCADAPI 2.2.7, the single-part prompt, the original executor, and `cad-code-session-v2` exports. The original CLI and Web upload have additive routing blocks. A one-solid STEP continues through the original route; multiple solids create a project containing one ordinary reconstruction session per unique part and a separately requested assembly session.
+
+## Setup
+
+Use the existing CAD Code setup and credentials. Do not write keys into project configuration. `CAD_CODE_PYTHON` must name the 2.2.7 virtual-environment interpreter, preserving its symlink path. Set `CAD_CODE_MULTISOLID_PART_PROMPT` to the unchanged single-part `prompt_v63.md`. Only installed tool paths are substituted; task instructions are preserved.
+
+The bundled preprocessing module and assembly skill are pinned in `multi/vendor-manifest.json`. The assembly skill is under `tools/assembly-skill`; it is loaded only by assembly sessions. The normal skill under `skills/simplecadapi` is unchanged. The notebook adapter changes only a copied product's `part_id` expression to `scad.notebook_id()`.
+
+```sh
+export CAD_CODE_PYTHON=/path/to/cad-code/.runtime/python/bin/python
+export CAD_CODE_MULTISOLID_PART_PROMPT=/path/to/prompt_v63.md
+./cad-code --file part-or-assembly.step run "existing single-part task"
+./cad-code prepare --file assembly.step --out projects/demo
+./cad-code run-parts --project projects/demo --parallel 4
+./cad-code status --project projects/demo --json
+./cad-code assemble --project projects/demo --wait --timeout 600
+./cad-code export --project projects/demo --out exports/demo
+./cad-code-multi --web
+```
+
+`cad-code-multi` provides the same project subcommands. Default workbench port is 8773 (`CAD_CODE_MULTI_PORT`). It binds only localhost. It supports upload, per-part attempt selection, concurrency, manual assembly, conversation/tool display, follow-up, and verified artifact downloads. The original Web upload routes a new multi-solid task to this workbench.
+
+`assemble --parts` accepts a JSON array of `{part_id,attempt_id}` rows. Without it, the CLI uses saved selections or the latest completed attempt with runnable Python and STEP. Geometry below the acceptance threshold remains visible; assembly evaluation makes the final decision. Assembly never starts automatically after parts unless an explicit caller chooses to do so.
+
+## Project and recovery
+
+`project.json` uses `cad-code-project-v1`, with `unique_parts[].attempts[]`, full occurrence mappings, revision numbers, and assembly attempts. `assembly.ir.json` binds each representative STEP/IR to source placements. `input/assembly-inputs.json` is the selected snapshot; adapted child notebooks live in `out/parts/<part-id>/model.py`.
+
+Part queues have 1–40 slots and one runtime-wide lease. A second active project queue is rejected, preventing project concurrency from multiplying the limit. The batch wrapper processes projects sequentially while each project uses the selected slots. `resume --project ...` recovers owned sessions and export/evaluation stages without resending ambiguous submissions. `--retry-failed` allows bounded new attempts. `stop --project ...` stops only recorded project-owned sessions. On Linux, launch long-running services/queues in tmux.
+
+Each part is independently evaluated with the unchanged `stepeval.py`; an agent-written verdict is ignored. The evaluated `candidate.step` is the canonical part delivery. The originally submitted STEP is retained separately.
+
+## Assembly evaluation
+
+The trusted controller creates a separate evaluation input manifest with SHA256s for every delivered Python source. It runs a fresh source-only replay with sandbox-exec on macOS or bubblewrap on Linux. Source STEP, IR, sibling projects, old packages/caches, and network are unavailable during replay. Files are read-only except an independent scratch/output directory. Original single-part sandbox code is unchanged.
+
+After replay, the trusted parent reopens the package, regenerates the STEP, and checks each source occurrence's ID, definition ID, placement and geometry. Missing small components cannot be hidden by overall IoU. `assembly-verdict-v1` separates `geometry_pass`, coverage, constraints, and `mate_status`. Static placement is the default for floating or ambiguous parts; it is reported as `source_placement`. A completed conversation alone is not a passing verdict.
+
+Evaluation inputs and results are versioned per follow-up turn. Prior verdict files are retained; session exports keep the actual model messages, tools, original image bytes, and empty reasoning when the provider returns no reasoning.
+
+## Compatibility and validation
+
+`node multi/freeze-check.mjs` checks the original file hashes. For the three original integration files it first removes explicitly marked additive blocks, proving the old code remains byte-identical. `CAD_CODE_SINGLE_SOLID=1` is an explicit legacy-entry mode for reproducing historical CLI fixture tests; normal uploads use automatic counting.
+
+```sh
+CAD_CODE_PYTHON=/path/to/python CAD_CODE_SINGLE_SOLID=1 npm test
+node --test multi/public/app.test.mjs
+/path/to/python -I multi/tests/test_assembly_replay.py -v
+/path/to/python -m unittest discover -s multi -p 'test_notebook_adapter.py' -v
+```
+
+Historical benchmark and training directories are never rewritten by this extension. New batch artifacts are under `stepir_geom_gen/cadcode_synth_multisolid`; training packaging uses an independent dataset and excludes evaluation provenance and hashes. Unsupported geometry is reported explicitly with diagnostics; no failed split is admitted as a validated part.

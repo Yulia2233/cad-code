@@ -1,0 +1,6 @@
+#!/bin/sh
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -n "${HTTPS_PROXY}${HTTP_PROXY}${https_proxy}${http_proxy}" ] && [ -z "${NODE_USE_ENV_PROXY}" ]; then
+  export NODE_USE_ENV_PROXY=1
+fi
+exec node "$SCRIPT_DIR/multi/cli.mjs" "$@"

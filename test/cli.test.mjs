@@ -290,6 +290,7 @@ test('headless CLI without credentials gives configuration instructions without 
 
 test('CLI --file creates/binds one session, uses isolated config and cleans up its own backend',async t=>{
   const f=await fixture(t),source=path.join(f.directory,'圆柱.step'),bytes=Buffer.from('ISO-10303-21;\n原始输入\nEND-ISO-10303-21;');fs.writeFileSync(source,bytes);
+  f.env.CAD_CODE_SINGLE_SOLID='1';
   const r=await f.finish(f.cli(['--credentials',f.credentials,'--file',source,'--mini']));
   assert.equal(r.exit.code,0,r.stderr);
   const events=f.events(),created=events.find(e=>e.event==='request'&&e.path==='/session'&&e.method==='POST');assert.ok(created);
@@ -323,6 +324,7 @@ test('CLI --file --continue selects the most recent parent session rather than a
 
 test('CLI file-import failure exits nonzero and tears down its newly owned backend',async t=>{
   const f=await fixture(t),source=path.join(f.directory,'not-there.step');
+  f.env.CAD_CODE_SINGLE_SOLID='1';
   const r=await f.finish(f.cli(['--credentials',f.credentials,'--file',source]));
   assert.notEqual(r.exit.code,0);assert.match(r.stderr,/ENOENT|no such file/i);
   assert.equal(f.events().some(e=>e.event==='spawn'&&e.mode==='attach'),false);

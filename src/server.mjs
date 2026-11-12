@@ -117,6 +117,13 @@ const opencodeConfig={
   agent:{'cad-code':{description:'使用 SimpleCADAPI 完成建模、检查、导出和渲染',mode:'primary',model:'cad-local/'+model,temperature:1,prompt:MAIN_PROMPT_MARKER,tools:{'*':false,exec:true,question:true,todowrite:true,task:true},permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}},'cad-review':{description:'独立检查父任务 out/ 下的真实渲染与验证结果，父产物只读。',mode:'subagent',model:'cad-local/'+model,temperature:1,prompt:REVIEW_PROMPT_MARKER,tools:{'*':false,exec:true},permission:{'*':'deny',exec:'allow'}},compaction:{model:'cad-local/'+model,temperature:1}},
   permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}
 };
+// BEGIN MULTISOLID ADDITIVE CONFIG
+// Assembly backends opt in in a separate process; the ordinary configuration above is unchanged.
+if(process.env.CAD_CODE_ASSEMBLY_CONTEXT_FILE){
+  const {buildAssemblyConfig}=await import('../multi/assembly-runtime.mjs');
+  Object.assign(opencodeConfig,buildAssemblyConfig(opencodeConfig,{pluginPath:path.join(ROOT,'multi/assembly-plugin.mjs'),model}));
+}
+// END MULTISOLID ADDITIVE CONFIG
 const configPath=path.join(RUNTIME,'opencode.json');fs.writeFileSync(configPath,JSON.stringify(opencodeConfig,null,2),{mode:0o600});
 // This isolated project stops parent-project instruction discovery.
 if(!fs.existsSync(path.join(WORKSPACE,'.git')))await new Promise((resolve,reject)=>{const p=spawn('git',['init','--quiet'],{cwd:WORKSPACE,stdio:'ignore'});p.on('exit',c=>c===0?resolve():reject(Error('git init failed')));});
@@ -159,6 +166,12 @@ app=http.createServer(async(req,res)=>{
     if(![`127.0.0.1:${port}`,`localhost:${port}`].includes(req.headers.host)||req.headers['sec-fetch-site']==='cross-site')return json(res,{error:'Host refused'},403);
     const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${port}`&&origin!==`http://localhost:${port}`)return json(res,{error:'Origin refused'},403);
     const url=new URL(req.url,`http://127.0.0.1:${port}`),route=url.pathname;
+    // BEGIN MULTISOLID ADDITIVE API
+    if(route==='/api/multisolid/dispatch'&&req.method==='POST'){
+      const {routeUpload}=await import('../multi/ingress.mjs');
+      return json(res,await routeUpload(await body(req),url.searchParams.get('name')||''));
+    }
+    // END MULTISOLID ADDITIVE API
     if(route==='/api/provider/models'){
       if(req.method!=='POST')return json(res,{error:'Method not allowed'},405);
       if(req.headers['x-cad-config-token']!==configToken)return json(res,{error:'Configuration token required'},403);

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>CAD Code · 多实体装配</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="CAD Code 多实体工作台">
+      <span class="brand-mark" aria-hidden="true">C</span>
+      <span>CAD Code</span>
+      <span class="product-label">MULTI-SOLID</span>
+    </a>
+    <div class="top-meta">
+      <span class="meta-label">模型</span>
+      <strong id="selectedModel" class="model-name">未报告</strong>
+      <span id="connectionState" class="connection"><i></i><span>连接中</span></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="project-rail" aria-label="多实体项目">
+      <form id="uploadForm" class="upload-form">
+        <label class="section-label" for="stepFile">新建项目</label>
+        <input id="stepFile" name="step" type="file" accept=".step,.stp" required>
+        <button id="createProject" class="primary-button" type="submit">上传 STEP</button>
+      </form>
+      <div class="rail-heading"><span>项目</span><span id="projectCount" class="count">0</span></div>
+      <nav id="projectList" class="project-list" aria-label="项目列表"></nav>
+      <div class="rail-foot"><span class="status-dot"></span><span>项目状态自动同步</span></div>
+    </aside>
+
+    <main class="main-pane">
+      <div id="errorBanner" class="error-banner" role="alert" hidden>
+        <span id="errorText"></span>
+        <button id="dismissError" class="icon-button" type="button" aria-label="关闭错误">×</button>
+      </div>
+      <section id="emptyState" class="empty-state">
+        <span class="eyebrow">多实体逆向与装配</span>
+        <h1>选择或上传一个 STEP 项目</h1>
+        <p>支持按唯一零件管理单件结果，并为每个源实例保留装配位置。</p>
+      </section>
+
+      <section id="projectView" hidden>
+        <div class="project-heading">
+          <div class="heading-copy">
+            <span class="eyebrow">项目</span>
+            <h1 id="projectTitle">—</h1>
+            <div class="project-subtitle"><code id="projectId">—</code><span id="projectStatus" class="status-pill">—</span></div>
+          </div>
+          <button id="stopProject" class="quiet-button danger-text" type="button" hidden>停止</button>
+        </div>
+
+        <section class="metrics" aria-label="项目统计">
+          <div class="metric"><span>Solid 实例</span><strong id="solidCount">—</strong></div>
+          <div class="metric"><span>唯一零件</span><strong id="uniqueCount">—</strong></div>
+          <div class="metric"><span>已完成单件</span><strong id="completedCount">—</strong></div>
+          <div class="metric"><span>装配评测</span><strong id="evaluationState" class="blocked-value">尚未评测</strong></div>
+        </section>
+
+        <div class="approval-banner" role="status">
+          <span class="approval-mark" aria-hidden="true">!</span>
+          <div><strong>独立装配复评</strong><span>完成装配后，自动检查组件数量、位置和几何。</span></div>
+          <code>assembly-verdict-v1</code>
+        </div>
+
+        <section class="dedup-section">
+          <div class="section-heading"><div><span class="eyebrow">来源几何</span><h2>去重依据</h2></div><span id="dedupSummary" class="muted">—</span></div>
+          <div id="dedupEvidence" class="dedup-evidence"><p class="muted">暂无去重记录</p></div>
+        </section>
+
+        <section class="parts-section">
+          <div class="section-heading"><div><span class="eyebrow">逆向任务</span><h2>唯一零件</h2></div><span id="partsProgress" class="muted">—</span></div>
+          <div id="partsList" class="parts-list"></div>
+          <div id="partsEmpty" class="empty-inline" hidden>项目尚未生成零件清单。</div>
+        </section>
+
+        <section class="run-controls" aria-labelledby="runTitle">
+          <div class="section-heading"><div><span class="eyebrow">单件逆向</span><h2 id="runTitle">运行设置</h2></div></div>
+          <div class="control-row">
+            <label for="parallelCount">并发数</label>
+            <input id="parallelCount" type="number" min="1" max="40" step="1" value="4" inputmode="numeric">
+            <span class="control-suffix">路</span>
+            <span class="control-spacer"></span>
+            <button id="runParts" class="primary-button" type="button">开始单件逆向</button>
+          </div>
+          <button id="startAssembly" class="assembly-button" type="button" disabled>开始装配</button>
+          <span id="assemblyHint" class="field-note">为每个唯一零件选择一个有 model.py 和 model.step 的已完成 attempt。</span>
+        </section>
+
+        <section class="assembly-conversation" aria-labelledby="assemblyConversationTitle">
+          <div class="section-heading">
+            <div><span class="eyebrow">装配会话</span><h2 id="assemblyConversationTitle">对话与工具结果</h2></div>
+            <span id="assemblySessionStatus" class="status-pill">暂无会话</span>
+          </div>
+          <div class="assembly-toolbar">
+            <label for="assemblyAttemptSelect">装配 attempt</label>
+            <select id="assemblyAttemptSelect" aria-label="选择装配 attempt" disabled><option value="">暂无装配 attempt</option></select>
+            <button id="refreshAssembly" class="quiet-button" type="button" disabled>刷新对话</button>
+          </div>
+          <div id="assemblySessionMeta" class="assembly-session-meta"></div>
+          <p id="assemblyConversationError" class="conversation-error" role="alert" hidden></p>
+          <div id="assemblyMessages" class="assembly-messages" role="log" aria-label="装配消息与工具结果" aria-live="polite" aria-relevant="additions text">
+            <p class="empty-inline">开始装配后，对话和工具结果会出现在这里。</p>
+          </div>
+          <div class="assembly-artifacts"><span>装配产物</span><div id="assemblyArtifactLinks"><span class="muted">暂无已报告产物</span></div></div>
+          <form id="assemblyComposer" class="assembly-composer">
+            <label for="assemblyFollowup">补充装配要求</label>
+            <textarea id="assemblyFollowup" rows="3" placeholder="输入需要继续检查或修改的内容…" maxlength="16000" disabled></textarea>
+            <div class="assembly-compose-actions">
+              <span class="muted">装配评测：<code>assembly-verdict-v1</code></span>
+              <button id="stopAssembly" class="quiet-button danger-text" type="button" hidden>停止项目</button>
+              <button id="sendAssembly" class="primary-button" type="submit" disabled>发送</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+  </div>
+  <footer class="page-foot"><span>SimpleCADAPI 2.2.7</span><span>STEPIR v6.3</span><span id="lastUpdated">—</span></footer>
+</body>
+</html>

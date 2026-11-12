@@ -172,6 +172,21 @@ async function submit(event){
   catch(e){showError(e);}finally{state.sending=false;setBusy(busy());}
 }
 async function upload(files){
+  // BEGIN MULTISOLID ADDITIVE UPLOAD
+  if(files?.length===1&&/\.st(?:ep|p)$/i.test(files[0].name)&&!state.data?.messages?.length){
+    try{
+      const routed=await api('/api/multisolid/dispatch?name='+encodeURIComponent(files[0].name),{method:'POST',headers:{'content-type':'application/octet-stream'},body:files[0]});
+      if(routed.kind==='multi'){location.assign(routed.workbench_url);return;}
+      if(routed.kind==='single'&&routed.session_id){
+        await loadSessions();
+        state.id=null;
+        await chooseSession(routed.session_id);
+        $('prompt').focus();
+        return;
+      }
+    }catch(error){showError(error);return;}
+  }
+  // END MULTISOLID ADDITIVE UPLOAD
   if(!files?.length)return;$('uploadButton').disabled=true;clearError();
   try{if(!state.id)await newSession();const id=state.id;for(const file of files){if(file.size>32*1024*1024)throw Error('文件超过32MB：'+file.name);const value=await api('/api/sessions/'+id+'/upload?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});if(id===state.id&&!state.uploads.includes(value.path))state.uploads.push(value.path);}renderUploadChips();await refresh();$('prompt').focus();}
   catch(e){showError(e);}finally{$('uploadButton').disabled=false;$('fileInput').value='';}

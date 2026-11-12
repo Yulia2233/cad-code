@@ -1,0 +1,18 @@
+{
+  "schema_version": "cad-code-multisolid-vendors-v1",
+  "step_tools_commit": "8514d5e",
+  "assembly_skill_commit": "9b60e16",
+  "files": {
+    "multi/vendor/step-tools-multisolid/.gitignore": "6feaded4e28ea86e001a6751b4e3d960e8b7c31b9616ff9936b79297086e809b",
+    "multi/vendor/step-tools-multisolid/README.md": "f0d4169a2c0cc5144a62ff96e01410264e344d1a5edc5c55362e84d51f07770e",
+    "multi/vendor/step-tools-multisolid/__init__.py": "fd19a1bba2b103c389a08d36dc66fc66e256ec774cb803d6fcba0114b6c33d22",
+    "multi/vendor/step-tools-multisolid/cli.py": "6732fd8fbdb28c2f1ad11b74ff36ae363c779daea48bdbe00b4c5c91d3f768c2",
+    "multi/vendor/step-tools-multisolid/sdk_adapter.py": "f8ea27e893121e2d841e420e9baa82949a57a0654c2b094bbe9842bc2b305b1a",
+    "multi/vendor/step-tools-multisolid/test_multisolid.py": "77296437caed125a0ffe4b0a416aa821b1d9af88580df904c92974de0ff24e45",
+    "tools/assembly-skill/MANIFEST.sha256": "6e590a84e3ce7a37507c3352d1825e69fc8c6f11af14f24b5b4fc6b49493fcbe",
+    "tools/assembly-skill/SKILL.md": "577d370e9ade193ba050730ee3e59cc4b2b5318144999bb6c04a320667b9b722",
+    "tools/assembly-skill/references/assembly-ir.md": "edea7ee874c4ed671b8426baa67f40caceb98e2926a8ea899c62682bcd6e8592",
+    "tools/assembly-skill/references/notebook-composition.md": "a6c3acc10027f74a896881c469bb779855ac3ac344ff0e97accdc0b43baaf3c7",
+    "tools/assembly-skill/references/workflow.md": "e81f880cfcb78aefb146096eb2b35306fd1e8eb25aa8b839e7b99dd6db779fef"
+  }
+}
