@@ -13,8 +13,8 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   fs.mkdirSync(path.join(root, 'unique/part-000'), {recursive: true});
   fs.mkdirSync(path.join(root, 'attempts/part-000/out'), {recursive: true});
-  fs.writeFileSync(path.join(root, 'assembly.ir.json'), '{"schema_version":"step-assembly-ir-v1"}\n');
-  fs.writeFileSync(path.join(root, 'unique/part-000/target.ir.jsonl'), '{"stepir_version":"v6.3"}\n');
+  fs.writeFileSync(path.join(root, 'assembly.ir.json'), JSON.stringify({schema_version:'step-assembly-ir-v1',units:'mm',source:{solid_occurrences:1,unique_parts:1},unique_parts:[{id:'part-000',representative_instance:'instance-000',metrics:{bbox_mm:{min:[0,0,0],max:[1,1,1]},bbox_size_mm:[1,1,1],face_count:6}}],instances:[{id:'instance-000',part_id:'part-000',placement:{origin:[0,0,0],x_axis:[1,0,0],y_axis:[0,1,0]},source_occurrence:{name:'part',path:'root/part'}}],relations:[],suggested_mates:[]})+'\n');
+  fs.writeFileSync(path.join(root, 'unique/part-000/target.ir.jsonl'), '{"unit":"mm","bbox":[[0,0,0],[1,1,1]],"vol":1,"area":6,"solids":1,"counts":{"face":6,"edge":12},"types":{"PLANE":6}}\n');
   fs.writeFileSync(path.join(root, 'attempts/part-000/out/model.py'), 'model = None\n');
   fs.writeFileSync(path.join(root, 'source.step'), 'target geometry\n');
   return root;
@@ -26,7 +26,7 @@ const selectedParts = root => {
   return [{part_id: 'part-000', notebook, notebook_sha256: sha(fs.readFileSync(path.join(root, notebook))), stepir, stepir_version: 'v6.3', stepir_sha256: sha(fs.readFileSync(path.join(root, stepir)))}];
 };
 
-test('snapshot copies only manifest-selected notebooks and v6.3 IR with hashes', t => {
+test('snapshot retains full hashed sources and writes a compact bounded context index', t => {
   const root = fixture(t), out = path.join(root, 'attempts/assembly-000/input');
   const manifest = stageAssemblyInputs({projectRoot: root, attemptInputDir: out, projectID: 'project-1', assemblyIRPath: 'assembly.ir.json', selectedParts: selectedParts(root)});
   assert.equal(manifest.schema_version, 'cad-code-assembly-inputs-v1');
@@ -34,7 +34,16 @@ test('snapshot copies only manifest-selected notebooks and v6.3 IR with hashes',
   assert.equal(manifest.parts[0].stepir, 'parts/part-000/target.ir.jsonl');
   assert.equal(fs.existsSync(path.join(out, 'source.step')), false);
   assert.equal(fs.existsSync(path.join(out, 'parts/part-000/model.py')), true);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'assembly-inputs.json'))).files.length, 3);
+  const saved = JSON.parse(fs.readFileSync(path.join(out, 'assembly-inputs.json')));
+  assert.equal(saved.files.length, 6);
+  assert.equal(saved.context_index, 'assembly-context-index.json');
+  assert.equal(saved.files.find(file => file.path === saved.context_index).sha256, saved.context_index_sha256);
+  const index = JSON.parse(fs.readFileSync(path.join(out, saved.context_index)));
+  assert.equal(index.counts.occurrences, 1);
+  assert.equal(index.counts.unique_parts, 1);
+  assert.equal(index.pages.parts.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(out, index.pages.parts[0]))).items[0].part_id, 'part-000');
+  assert.ok(Buffer.byteLength(JSON.stringify(index)) < 12000);
 });
 
 test('snapshot rejects non-v6.3 IR, target STEP, symlinks, and hash drift', t => {

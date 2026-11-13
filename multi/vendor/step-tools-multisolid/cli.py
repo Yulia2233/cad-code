@@ -28,7 +28,7 @@ from sdk_adapter import (
 
 
 SCHEMA_VERSION = "step-assembly-ir-v1"
-PREPROCESS_VERSION = "step-multisolid-preprocess-v1"
+PREPROCESS_VERSION = "step-multisolid-preprocess-v2"
 IR_VERSION = "v6.3"
 STEPIR_V63_SHA256 = "bce850d29452142f8e54387d8a4a7c820ced744fb61aa3e953b71c8aa4bb371c"
 
@@ -84,21 +84,56 @@ def _translation(rep: dict[str, Any], current: dict[str, Any]) -> list[list[floa
     return result
 
 
-def _bbox_relations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _bbox_relations(rows: list[dict[str, Any]], neighbors_per_instance: int = 8) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return bounded nearest-AABB facts instead of a quadratic relation dump."""
     import math
-    result = []
+    import heapq
+
+    if neighbors_per_instance < 1:
+        raise ValueError("neighbors_per_instance must be positive")
+    heaps: list[list[tuple[float, int, tuple[float, float, float]]]] = [[] for _ in rows]
     for index, left in enumerate(rows):
         a = left["metrics"]["bbox_mm"]
-        for right in rows[index + 1:]:
+        for right_index in range(index + 1, len(rows)):
+            right = rows[right_index]
             b = right["metrics"]["bbox_mm"]
-            gaps = [max(0.0, a["min"][k] - b["max"][k], b["min"][k] - a["max"][k]) for k in range(3)]
-            result.append({
-                "kind": "bbox_distance_lower_bound", "instances": [left["id"], right["id"]],
-                "distance_lower_bound_mm": math.sqrt(sum(value * value for value in gaps)),
-                "axis_gaps_mm": gaps, "evidence": "source_world_axis_aligned_bounding_boxes",
-                "interpretation": "Positive bound proves separation. Zero does not establish contact, overlap, or an engineering mate.",
-            })
-    return result
+            gaps = tuple(max(0.0, a["min"][k] - b["max"][k], b["min"][k] - a["max"][k]) for k in range(3))
+            distance = math.sqrt(sum(value * value for value in gaps))
+            for owner, neighbor in ((index, right_index), (right_index, index)):
+                heap = heaps[owner]
+                item = (-distance, -neighbor, gaps)
+                if len(heap) < neighbors_per_instance:
+                    heapq.heappush(heap, item)
+                elif item > heap[0]:
+                    heapq.heapreplace(heap, item)
+
+    retained: dict[tuple[int, int], tuple[float, tuple[float, float, float]]] = {}
+    for owner, heap in enumerate(heaps):
+        for neg_distance, neg_neighbor, gaps in heap:
+            neighbor = -neg_neighbor
+            pair = (min(owner, neighbor), max(owner, neighbor))
+            retained[pair] = (-neg_distance, gaps)
+
+    result = []
+    for (left_index, right_index), (distance, gaps) in sorted(retained.items()):
+        result.append({
+            "kind": "bbox_distance_lower_bound",
+            "instances": [rows[left_index]["id"], rows[right_index]["id"]],
+            "distance_lower_bound_mm": distance,
+            "axis_gaps_mm": list(gaps),
+            "evidence": "source_world_axis_aligned_bounding_boxes",
+            "selection": "nearest_neighbors_top_k_per_instance",
+            "interpretation": "Positive bound proves separation. Zero does not establish contact, overlap, or an engineering mate.",
+        })
+    possible = len(rows) * (len(rows) - 1) // 2
+    return result, {
+        "kind": "bounded_nearest_bbox_neighbors",
+        "possible_pair_count": possible,
+        "retained_pair_count": len(result),
+        "omitted_pair_count": possible - len(result),
+        "per_instance_limit": neighbors_per_instance,
+        "relation_semantics": "diagnostic_lower_bound_only_not_mate_evidence",
+    }
 
 
 def inspect_step(step_path: Path) -> dict[str, Any]:
@@ -345,6 +380,7 @@ def prepare_project(
             }
             for row in instance_rows
         ]
+        bbox_relations, relations_summary = _bbox_relations(instance_rows)
         assembly_ir = {
             "schema_version": SCHEMA_VERSION,
             "units": "mm",
@@ -361,7 +397,8 @@ def prepare_project(
                 {key: value for key, value in row.items() if key not in {"representative_index", "metrics", "centered_geometry_sha256", "split_step", "split_step_sha256"}}
                 for row in instance_rows
             ],
-            "relations": _bbox_relations(instance_rows),
+            "relations": bbox_relations,
+            "relations_summary": relations_summary,
             "suggested_mates": [],
             "unresolved": unresolved,
             "tolerances": {

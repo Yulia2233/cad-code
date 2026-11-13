@@ -437,7 +437,8 @@
       if (requestID !== state.assemblyRequest || key !== state.assemblyKey || id !== projectId(state.project)) return;
       state.assemblyDetail = detail;
       if (conversationBusy(detail)) state.assemblyPending = false;
-      $('assemblyConversationError').hidden = true;
+      $('assemblyConversationError').textContent = detail.error || '';
+      $('assemblyConversationError').hidden = !detail.error;
       renderConversation(Array.isArray(detail.messages) ? detail.messages : []);
       renderConversationControls();
     } catch (error) {

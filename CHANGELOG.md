@@ -2,6 +2,8 @@
 
 ## Unreleased — 2026-11-02
 
+- 2026-11-13: Assembly sessions use a bounded context index with paged part/occurrence facts and a capped candidate list. The controller creates a source-pose scaffold with one grounded reference, occurrence-specific connectors, and a fixed spanning tree; evidenced motion hypotheses can replace individual fixed edges. Preserve the original single-solid code, prompt, skill, and trajectory format. Preprocessing bounds retained AABB relation rows; it does not infer mechanical joints.
+
 - 2026-11-07：会话初始化不再复制任何工具，工作区不再有 `tools/`。CAD 脚本只用 skill 自带的 `skills/simplecadapi/scripts/stepir.py`、`stepeval.py`，按绝对路径只读运行（运行时提示词新增 `{{SKILL_SCRIPTS}}`）；`tools/` 只保留给 bench_cli 评分器用的 `cadeval.py`、`robust_iou.py`、`frozen/compare.py`、`cadthreads.py`，其余移到 `.runtime/tools-backup/`。
 
 - 2026-11-07：升级到 SimpleCADAPI 2.2.7。独立 Python 环境改装 `simplecadapi[editor,verify]==2.2.7`（自带 C++ 几何内核，含网页编辑器和 OCP），旧 2.2.5 环境保留在 `.runtime/python-2.2.5`；内置 skill 换成改版 2.2.7（STEP 逆向流程重写：STEPIR v6.2 读法与注意事项、网页编辑器 notebook 格式、`scripts/stepir.py` 与 `scripts/stepeval.py`），旧 skill 备份在 `.runtime/skill-backup/`；会话工具新增 `stepeval.py`，`stepir.py` 升级到 v6.2.2，`robust_iou.py` 适配 2.2.7；系统提示词与运行时提示词改为按新流程执行（notebook 格式、以 stepeval 报告为证据，视觉复核按需）。

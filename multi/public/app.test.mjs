@@ -114,4 +114,5 @@ test('conversation UI provides manual follow-up, stop and download containers', 
   }
   assert.match(html, /role="log"/);
   assert.match(source, /body: JSON\.stringify\(\{text\}\)/);
+  assert.match(source, /assemblyConversationError'\)\.textContent = detail\.error/);
 });

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import simplecadapi as scad
 
-from cli import inspect_step, prepare_project
+from cli import _bbox_relations, inspect_step, prepare_project
 from sdk_adapter import load_solids, metrics, same_geometry, rigid_transform, verify_roundtrip
 
 
@@ -18,6 +18,20 @@ PYTHON = Path(os.environ.get("MULTISOLID_PYTHON", sys.executable))
 
 
 class MultiSolidPreprocessTests(unittest.TestCase):
+    def test_bbox_relation_index_is_bounded_for_large_occurrence_sets(self) -> None:
+        rows = []
+        for index in range(1000):
+            x = float(index * 10)
+            rows.append({"id": f"instance-{index:04d}", "metrics": {"bbox_mm": {
+                "min": [x, 0.0, 0.0], "max": [x + 1.0, 1.0, 1.0]}}})
+        relations, summary = _bbox_relations(rows, neighbors_per_instance=4)
+        possible = 1000 * 999 // 2
+        self.assertEqual(summary["possible_pair_count"], possible)
+        self.assertEqual(summary["retained_pair_count"], len(relations))
+        self.assertEqual(summary["omitted_pair_count"], possible - len(relations))
+        self.assertLessEqual(len(relations), 1000 * 4)
+        self.assertTrue(all(row["selection"] == "nearest_neighbors_top_k_per_instance" for row in relations))
+
     def test_split_translation_dedup_and_v63_ir(self) -> None:
         if STEPIR_SCRIPT is None:
             self.fail("Set MULTISOLID_STEPIR_SCRIPT to the frozen STEPIR v6.3 bundled script")

@@ -48,12 +48,14 @@ assembly IR. It is not the single-part reverse-engineering skill.
   part definition. A reused part definition does not reduce occurrence count.
 - Distinguish measured geometry and source placement from inferred mechanical
   intent. Do not claim to have recovered the original assembly history.
-- Use documented connectors and constraints only when the provided geometry
-  supports them. A coaxial or touching relation alone does not prove that a
-  joint is revolute, fixed, or sliding.
+- Preserve the controller's source-pose fixed scaffold as an explicit static
+  assumption. Infer physical mates or motion only when the provided geometry
+  and function support them. A coaxial or touching relation alone does not
+  prove that a joint is revolute, physically fixed, or sliding.
 - If a component is floating, disconnected, or has ambiguous mating evidence,
-  keep its source placement as the default static placement. Report it as a
-  `source_placement` fallback, not as a solved mate.
+  keep its source placement and scaffold fixed edge as the default static
+  assumption. Report it as a `source_placement` fallback, not as a recovered
+  physical mate.
 - Do not invent supports, remove clearances, fuse separate parts, or move a
   component merely to make the assembly look connected.
 - Deliver an assembly notebook, its complete relative child-source tree, a

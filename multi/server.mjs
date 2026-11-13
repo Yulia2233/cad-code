@@ -11,6 +11,7 @@ import {resolveRegisteredProject, listRegisteredProjects, registerProject} from 
 import {readProject, updateProject} from './store.mjs';
 import {runPartQueue, stopProjectPartSessions, ensureBackend} from './part-runner.mjs';
 import {stageAssemblyInputs} from './inputs.mjs';
+import {createStaticAssemblyScaffold, createStaticConnectorPlan} from './assembly-context.mjs';
 import {importFiles} from '../src/cli-input.mjs';
 import {startAssemblyRuntime} from './assembly-runtime.mjs';
 import {evaluateAssembly} from './evaluation.mjs';
@@ -155,14 +156,14 @@ function safeProjectFile(projectDir, relative) {
   return absolute;
 }
 
-async function ocRequest(connection, route, method = 'GET', body) {
+async function ocRequest(connection, route, method = 'GET', body, timeoutMs = 30000) {
   const url = new URL(connection.url);
   if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname)) throw Error('Assembly backend must be local');
   const response = await fetch(new URL(route, url), {
     method,
     headers: {authorization: 'Basic ' + Buffer.from('opencode:' + connection.password).toString('base64'), ...(body ? {'content-type': 'application/json'} : {})},
     ...(body ? {body: JSON.stringify(body)} : {}),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const value = await response.json().catch(() => null);
   if (!response.ok) throw Error(value?.error || `OpenCode returned ${response.status}`);
@@ -216,7 +217,7 @@ async function createAssembly(record, selected) {
     project_id: project.project_id,
     assembly_ir: 'input/assembly.ir.json',
     inputs_manifest: 'input/assembly-inputs.json',
-    parts_index: 'input/assembly-inputs.json',
+    parts_index: 'input/assembly-context-index.json',
     output_root: 'out',
     evaluator,
   };
@@ -230,23 +231,37 @@ async function createAssembly(record, selected) {
   let runtime;
   try {
     runtime = await startAssemblyRuntime({runtimeDir, workspaceDir, contextFile, baseConfigPath: providerConfig, pluginPath: path.join(here, 'assembly-plugin.mjs'), model: baseConnection.model, python: process.env.CAD_CODE_PYTHON || PYTHON, skill: SKILL, assemblySkill, opencodeBin: process.env.OPENCODE_BIN || 'opencode'});
-    const session = await ocRequest(runtime.connection, '/session', 'POST', {title: `Assembly · ${project.source.filename}`});
+    const session = await ocRequest(runtime.connection, '/session', 'POST', {title: `Assembly · ${project.source.filename}`}, 120000);
     if (!/^ses_[A-Za-z0-9_-]+$/.test(session?.id || '')) throw Error('Assembly backend did not return a session ID');
     const sessionWorkspace = path.join(workspaceDir, session.id);
     for (let retry = 0; retry < 100 && !fs.existsSync(sessionWorkspace); retry++) await new Promise(resolve => setTimeout(resolve, 50));
     if (!fs.existsSync(sessionWorkspace)) throw Error('Assembly session workspace was not created');
     const inputManifest = stageAssemblyInputs({projectRoot, attemptInputDir: path.join(sessionWorkspace, 'input'), projectID: project.project_id, assemblyIRPath: 'assembly.ir.json', selectedParts});
+    const assemblyIR = JSON.parse(fs.readFileSync(path.join(projectRoot, 'assembly.ir.json'), 'utf8'));
+    const staticPlan = createStaticConnectorPlan(assemblyIR);
+    fs.writeFileSync(path.join(attemptBase, 'static-scaffold-plan.json'), JSON.stringify(staticPlan, null, 2) + '\n', {mode: 0o600, flag: 'wx'});
     const adaptations = [];
     for (const part of inputManifest.parts) {
       const destination = path.join(sessionWorkspace, 'out/parts', part.part_id, 'model.py');
-      const adapted = spawnSync(process.env.CAD_CODE_PYTHON || PYTHON,
-        [path.join(here, 'notebook_adapter.py'), path.join(sessionWorkspace, 'input', part.notebook), destination],
+      const connectors = staticPlan.connectors[part.part_id] || [];
+      const connectorSpec = path.join(attemptBase, 'connector-specs', part.part_id + '.json');
+      if (connectors.length) {
+        fs.mkdirSync(path.dirname(connectorSpec), {recursive: true, mode: 0o700});
+        fs.writeFileSync(connectorSpec, JSON.stringify(connectors), {mode: 0o600, flag: 'wx'});
+      }
+      const adapterArgs = [path.join(here, 'notebook_adapter.py'), path.join(sessionWorkspace, 'input', part.notebook), destination];
+      if (connectors.length) adapterArgs.push('--connectors-json', connectorSpec);
+      const adapted = spawnSync(process.env.CAD_CODE_PYTHON || PYTHON, adapterArgs,
         {encoding: 'utf8', maxBuffer: 1024 * 1024});
       if (adapted.status !== 0) throw Error('Child identity adaptation failed for ' + part.part_id + ': ' + adapted.stderr);
       adaptations.push({part_id: part.part_id, ...JSON.parse(adapted.stdout)});
     }
     fs.writeFileSync(path.join(attemptBase, 'identity-adaptations.json'), JSON.stringify(adaptations, null, 2) + '\n', {mode: 0o600, flag: 'wx'});
-    const userMessage = 'Compose the selected part notebooks into the product assembly using input/assembly.ir.json and input/assembly-inputs.json. Adapted child copies are available in out/parts/<part-id>/model.py and use scad.notebook_id(); load each once with scad.use("parts/<part-id>/model.py", id="<part-id>"). Preserve every source occurrence and use source placement as the fallback for unresolved parts. Deliver out/product.py, out/product.scadpkg, out/product.step, and out/assembly-report.json. The trusted controller independently evaluates the complete source tree after this turn. Report your actual checks without inventing independent verdicts.';
+    const scaffold = createStaticAssemblyScaffold({assembly: assemblyIR, parts: inputManifest.parts, connectorPlan: staticPlan});
+    const scaffoldPath = path.join(sessionWorkspace, 'out/product.py');
+    fs.mkdirSync(path.dirname(scaffoldPath), {recursive: true});
+    fs.writeFileSync(scaffoldPath, scaffold, {flag: 'wx', mode: 0o600});
+    const userMessage = 'Review the bounded assembly index at input/assembly-context-index.json. The trusted controller has already checked every source hash, created the deterministic static source-pose scaffold at out/product.py, and staged the complete notebook/STEPIR snapshot for evaluation. Do not read the full assembly IR, input manifest, every notebook, or every STEPIR. Inspect only index pages and local STEPIR evidence for the small candidate relations you decide to review. Keep all occurrences in the scaffold; leave unsupported groups static at source poses. Make a sparse motion change only when the index and queried geometry jointly justify it. Deliver out/product.scadpkg, out/product.step, and out/assembly-report.json, then report the candidates considered, static assumptions, actual checks, and unresolved relations. The trusted controller independently evaluates the complete source tree after this turn; do not invent independent verdicts.';
     const updated = readProject(projectRoot);
     updateProject(projectRoot, updated.revision, next => {
       const attempt = next.assembly_attempts.find(item => item.id === attemptID);
@@ -430,6 +445,9 @@ const app = http.createServer(async(req, res) => {
       const assemblyRoute = action.match(/^assembly\/([A-Za-z0-9_-]{8,80})(?:\/(.*))?$/);
       if (assemblyRoute) {
         const attempt = assemblyAttempt(readProject(record.path), assemblyRoute[1]), subroute = assemblyRoute[2] || '';
+        if (!subroute && req.method === 'GET' && !attempt.session_id) {
+          return json(res, {attempt_id: attempt.id, session_id: null, attempt_dir: null, status: attempt.status, messages: [], error: attempt.error || 'Assembly session was not created', replay_status: 'not_evaluated'});
+        }
         const connection = JSON.parse(fs.readFileSync(path.join(record.path, attempt.runtime_dir, 'cli-connection.json'), 'utf8'));
         if (!subroute && req.method === 'GET') {
           if (url.searchParams.has('status_only')) {

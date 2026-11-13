@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {buildAssemblyContextAssets} from './assembly-context.mjs';
 
 const hashFile = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const partIDPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -51,6 +52,14 @@ export function stageAssemblyInputs({projectRoot, attemptInputDir, projectID, as
     });
   }
 
+  const assemblyIRHash = hashFile(assemblyIR);
+  const contextAssets = buildAssemblyContextAssets({projectRoot: root, projectID, assemblyIRPath,
+    assemblyIRHash, selectedParts});
+  const contextIndexTarget = 'assembly-context-index.json';
+  const contextIndexBytes = Buffer.from(JSON.stringify(contextAssets.index, null, 2) + '\n');
+  files.push({target: contextIndexTarget, role: 'assembly_context_index', content: contextIndexBytes});
+  for (const page of contextAssets.pageFiles) files.push({target: page.target, role: page.role, content: Buffer.from(page.content)});
+
   const destination = path.resolve(attemptInputDir);
   if (fs.existsSync(destination)) throw Error('AssemblyInputError: refusing to overwrite input snapshot');
   fs.mkdirSync(path.dirname(destination), {recursive: true});
@@ -60,13 +69,16 @@ export function stageAssemblyInputs({projectRoot, attemptInputDir, projectID, as
     for (const file of files) {
       const target = path.join(temporary, file.target);
       fs.mkdirSync(path.dirname(target), {recursive: true});
-      fs.copyFileSync(file.source, target, fs.constants.COPYFILE_EXCL);
+      if (file.source) fs.copyFileSync(file.source, target, fs.constants.COPYFILE_EXCL);
+      else fs.writeFileSync(target, file.content, {flag: 'wx', mode: 0o600});
     }
     const manifest = {
       schema_version: 'cad-code-assembly-inputs-v1',
       project_id: projectID,
       assembly_ir: 'assembly.ir.json',
-      assembly_ir_sha256: hashFile(assemblyIR),
+      assembly_ir_sha256: assemblyIRHash,
+      context_index: contextIndexTarget,
+      context_index_sha256: hashFile(path.join(temporary, contextIndexTarget)),
       parts: partRows,
       files: files.map(({target, role}) => ({path: target, role, sha256: hashFile(path.join(temporary, target))})),
     };

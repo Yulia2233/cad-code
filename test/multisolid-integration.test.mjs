@@ -62,6 +62,16 @@ async function author(id,input) {
     await plugin['experimental.chat.system.transform']({sessionID:id,model:{id:input.model.modelID,api:{id:input.model.modelID}}},system);
     record({event:'compiled',session:id,role:input.agent,system:system.system,runtime:process.env.CAD_CODE_RUNTIME});
     const ir=JSON.parse(fs.readFileSync(path.join(work,'input/assembly.ir.json')));
+    const scaffold=fs.readFileSync(path.join(work,'out/product.py'),'utf8');
+    const contextIndex=JSON.parse(fs.readFileSync(path.join(work,'input/assembly-context-index.json'),'utf8'));
+    const adaptedParts=ir.unique_parts.map(part=>fs.readFileSync(path.join(work,'out/parts',part.id,'model.py'),'utf8')).join('\n');
+    record({event:'scaffold',session:id,uses:(scaffold.match(/scad\.use\(/g)||[]).length,
+      components:(scaffold.match(/scad\.add_component_rassembly\(/g)||[]).length,
+      grounds:(scaffold.match(/scad\.ground_component_rassembly\(/g)||[]).length,
+      fixed_constraints:(scaffold.match(/scad\.add_fixed_constraint_rassembly\(/g)||[]).length,
+      source_occurrences:(scaffold.match(/"id":"instance-/g)||[]).length,
+      connectors:(adaptedParts.match(/scad\.add_connector_rpart\(/g)||[]).length,
+      context_index:contextIndex.schema_version,occurrences:contextIndex.counts.occurrences});
     const source=['# /// script','# requires-python = ">=3.10"','# dependencies = ["simplecadapi"]','# [tool.simplecadapi]','# id = "product"','# revision = "1.0.0"','# ///','import marimo','app = marimo.App()','with app.setup:','    import simplecadapi as scad','@app.cell','def _():'];
     for(const [index,part] of ir.unique_parts.entries())source.push('    p'+index+' = scad.use('+JSON.stringify('parts/'+part.id+'/model.py')+', id='+JSON.stringify(part.id)+')');
     source.push('    _assembly = scad.make_assembly_rassembly(assembly_id="product")');
@@ -212,6 +222,17 @@ test('real multi HTTP + plugin + gateway + isolated evaluation + export integrat
     try{const drift=await f.api(`/api/projects/${id}/assemble`,'POST',{parts});assert.equal(drift.status,400);assert.match(drift.body.error,/hash mismatch/);}finally{fs.writeFileSync(file,before);}
     assert.equal(readProject(projectRoot).assembly_attempts.length,0);
   });
+  await t.test('failed assembly without a session returns its saved error without contacting the stopped runtime',async()=>{
+    let current=readProject(projectRoot);
+    current=updateProject(projectRoot,current.revision,next=>next.assembly_attempts.push({id:'assembly-failed-fixture',status:'failed',session_id:null,attempt_dir:null,runtime_dir:'assembly/missing/runtime',error:'The operation was aborted due to timeout'}));
+    const response=await f.api(`/api/projects/${id}/assembly/assembly-failed-fixture`);
+    assert.equal(response.status,200,JSON.stringify(response.body));
+    assert.equal(response.body.session_id,null);
+    assert.deepEqual(response.body.messages,[]);
+    assert.match(response.body.error,/aborted due to timeout/);
+    current=readProject(projectRoot);
+    updateProject(projectRoot,current.revision,next=>{next.assembly_attempts=next.assembly_attempts.filter(row=>row.id!=='assembly-failed-fixture');});
+  });
   const started=await f.api(`/api/projects/${id}/assemble`,'POST',{parts});
   assert.equal(started.status,202,JSON.stringify(started.body));
   const attemptID=started.body.attempt_id;
@@ -221,12 +242,21 @@ test('real multi HTTP + plugin + gateway + isolated evaluation + export integrat
     assert.equal(readProject(projectRoot).assembly_attempts.length,1);
   });
   await until(()=>f.events().some(e=>e.event==='compiled'&&e.role==='cad-assembly'),15000);
+  await t.test('controller stages a bounded context index and complete deterministic source-pose scaffold',()=>{
+    const scaffold=f.events().find(e=>e.event==='scaffold');
+    assert.deepEqual({uses:scaffold.uses,components:scaffold.components,grounds:scaffold.grounds,fixed_constraints:scaffold.fixed_constraints,
+      source_occurrences:scaffold.source_occurrences,connectors:scaffold.connectors,context_index:scaffold.context_index,occurrences:scaffold.occurrences},
+      {uses:1,components:1,grounds:1,fixed_constraints:1,source_occurrences:2,connectors:2,
+       context_index:'cad-code-assembly-context-index-v1',occurrences:2});
+  });
   let completed;
   await until(async()=>{const response=await f.api(`/api/projects/${id}/assembly/${attemptID}`);assert.equal(response.status,200,JSON.stringify(response.body));if(['completed','failed'].includes(response.body.status)){completed=response.body;return true;}return false;},60000);
   project=readProject(projectRoot);
   const attempt=project.assembly_attempts.find(row=>row.id===attemptID),work=path.join(projectRoot,attempt.attempt_dir);
   await t.test('selected notebook identity changes only in the assembly copy and the plugin is actually loaded',()=>{
-    for(const part of project.unique_parts){assert.equal(sha(fs.readFileSync(path.join(projectRoot,part.attempts[0].deliverables.model_py))),originalHashes.get(part.id));assert.match(fs.readFileSync(path.join(work,'out/parts',part.id,'model.py'),'utf8'),/part_id=scad\.notebook_id\(\)/);}
+    for(const part of project.unique_parts){assert.equal(sha(fs.readFileSync(path.join(projectRoot,part.attempts[0].deliverables.model_py))),originalHashes.get(part.id));const adapted=fs.readFileSync(path.join(work,'out/parts',part.id,'model.py'),'utf8');assert.match(adapted,/part_id=scad\.notebook_id\(\)/);assert.equal((adapted.match(/scad\.add_connector_rpart\(/g)||[]).length,2);}
+    const plan=readJSON(path.join(projectRoot,attempt.runtime_dir,'../static-scaffold-plan.json'));
+    assert.equal(plan.strategy,'source_pose_fixed_spanning_star');assert.equal(plan.fixed_edges.length,1);
     const compiled=f.events().find(e=>e.event==='compiled'&&e.role==='cad-assembly');
     assert.ok(compiled.system.join('\n').includes('SimpleCADAPI 2.2.7'));
     assert.ok(!compiled.system.join('\n').includes('[CAD_CODE_ASSEMBLY_ROLE]'));

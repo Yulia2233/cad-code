@@ -30,6 +30,7 @@ export default async function CADAssemblyPlugin({client}) {
         assemblyIR: context.assembly_ir,
         inputsManifest: context.inputs_manifest,
         partsIndex: context.parts_index,
+        contextIndex: context.parts_index,
         outputRoot: context.output_root,
         evaluator: context.evaluator,
         skillDir: process.env.CAD_CODE_SKILL,
