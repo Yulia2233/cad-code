@@ -117,4 +117,27 @@ if __name__ == "__main__":
   assert.equal(facts.bbox.max[1], 21, JSON.stringify(facts));
   assert.equal(facts.bbox.min[2], 0, JSON.stringify(facts));
   assert.equal(facts.bbox.max[2], 9, JSON.stringify(facts));
+
+  const indexPath = path.join(root, 'assembly-context-index.json');
+  const context = {schema_version: 'cad-code-assembly-context-index-v1', project_id: 'test',
+    assembly_ir_sha256: 'a'.repeat(64), counts: {occurrences: 3, candidate_relations_exposed: 0, candidate_relations_omitted: 0}};
+  fs.writeFileSync(indexPath, JSON.stringify(context));
+  const helper = path.join(path.dirname(fileURLToPath(import.meta.url)), '../tools/assembly_delivery.py');
+  result = spawnSync(PYTHON, [helper, '--notebook', path.join(root, 'product.py'), '--index', indexPath,
+    '--out', path.join(root, 'delivery')], {cwd: root, encoding: 'utf8', timeout: 90000});
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const observed = JSON.parse(result.stdout.trim().split('\n').at(-1));
+  assert.equal(observed.occurrences, 3);
+  assert.equal(observed.constraint_count, 2);
+  assert.equal(observed.constraints.solved, true);
+  assert.equal(observed.independent_acceptance, 'pending_controller_evaluation');
+  const report = JSON.parse(fs.readFileSync(path.join(root, 'delivery/assembly-report.json')));
+  assert.deepEqual(report.occurrences.map(row => row.instance_id), assembly.instances.map(row => row.id));
+  assert.ok(fs.statSync(path.join(root, 'delivery/product.step')).size > 0);
+  fs.writeFileSync(indexPath, JSON.stringify({...context, counts: {...context.counts, occurrences: 4}}));
+  result = spawnSync(PYTHON, [helper, '--notebook', path.join(root, 'product.py'), '--index', indexPath,
+    '--out', path.join(root, 'mismatch')], {cwd: root, encoding: 'utf8', timeout: 90000});
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /occurrence count differs/);
+  assert.equal(fs.existsSync(path.join(root, 'mismatch/product.step')), false);
 });

@@ -2,6 +2,8 @@
 
 ## Unreleased — 2026-11-02
 
+- 2026-11-13: Shorten static assembly turns with an assembly-only delivery helper for build, residual inspection and exports. The runtime prompt avoids agent-written packaging scripts and redundant successful checks; independent acceptance remains in the controller.
+
 - 2026-11-13: Assembly sessions use a bounded context index with paged part/occurrence facts and a capped candidate list. The controller creates a source-pose scaffold with one grounded reference, occurrence-specific connectors, and a fixed spanning tree; evidenced motion hypotheses can replace individual fixed edges. Preserve the original single-solid code, prompt, skill, and trajectory format. Preprocessing bounds retained AABB relation rows; it does not infer mechanical joints.
 
 - 2026-11-07：会话初始化不再复制任何工具，工作区不再有 `tools/`。CAD 脚本只用 skill 自带的 `skills/simplecadapi/scripts/stepir.py`、`stepeval.py`，按绝对路径只读运行（运行时提示词新增 `{{SKILL_SCRIPTS}}`）；`tools/` 只保留给 bench_cli 评分器用的 `cadeval.py`、`robust_iou.py`、`frozen/compare.py`、`cadthreads.py`，其余移到 `.runtime/tools-backup/`。

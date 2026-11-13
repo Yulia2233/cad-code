@@ -9,7 +9,7 @@ Sessions no longer receive a `tools/` directory. The CAD scripts an agent uses a
 
 (the runtime prompt gives the absolute path of `skills/simplecadapi/scripts`).
 
-What is left here is used by bench_cli's independent scorer only:
+The legacy scoring helpers are used by bench_cli's independent scorer:
 
 | File | Purpose |
 |---|---|
@@ -20,3 +20,5 @@ What is left here is used by bench_cli's independent scorer only:
 
 Notebook candidates are replayed by `bench_cli/src/replay_notebook.py`. The former session helpers (`cad.py`, `families_common.py`,
 and copies of `stepir.py` / `stepeval.py`) were moved to `.runtime/tools-backup/` on 2026-11-07.
+
+`assembly_delivery.py` is an assembly-only build helper, referenced by the separate assembly runtime prompt. It builds a source assembly with SimpleCADAPI 2.2.7, exports its package and STEP, and reports real constraint residuals. Its report explicitly leaves independent acceptance pending; `multi/assemblyeval.py` performs that check in a separate source-only replay. Normal single-part sessions and prompts do not use this helper.
