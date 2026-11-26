@@ -89,7 +89,9 @@ else if(mode==='web'){
   const kv=path.join(RUNTIME,'xdg/state/opencode/kv.json');fs.mkdirSync(path.dirname(kv),{recursive:true});let preferences={};try{preferences=JSON.parse(fs.readFileSync(kv));}catch{}preferences.thinking_mode='show';const temp=kv+'.'+process.pid+'.tmp';fs.writeFileSync(temp,JSON.stringify(preferences),{mode:0o600});fs.renameSync(temp,kv);
   command=['attach',connection.url,'--dir',WORKSPACE,...pass];
 }
-child=spawn(process.env.OPENCODE_BIN||'opencode',command,{cwd:WORKSPACE,env,stdio:'inherit'});
+const ocBin=process.env.OPENCODE_BIN||'opencode';
+const ocCliOpts={cwd:WORKSPACE,env,stdio:'inherit'};
+child=process.platform==='win32'&&/\.(mjs|js)$/i.test(ocBin)?spawn(process.execPath,[ocBin,...command],ocCliOpts):spawn(ocBin,command,process.platform==='win32'&&!/\.(exe|com)$/i.test(ocBin)?{...ocCliOpts,shell:true}:ocCliOpts);
 const code=await new Promise(resolve=>{child.on('error',e=>{console.error(e.message);resolve(1);});child.on('exit',c=>resolve(c??0));});
 cleanup();if(ownsBackend)await new Promise(resolve=>{if(server.exitCode!==null)return resolve();server.on('exit',resolve);setTimeout(resolve,2000);});
 process.exit(code);

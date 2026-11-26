@@ -84,16 +84,28 @@ your-secret-manager-command | ./cad-code config --base-url https://your-provider
 
 ## 新机器安装
 
-当前支持 **macOS**，需要 Node.js 22+、OpenCode 1.18.27、Python 3.12/3.13 和系统 `sandbox-exec`。
+支持 **macOS**、**Linux**（需 `bubblewrap`）及 **Windows**（原生 PowerShell/CMD + Git Bash），需要 Node.js 22+、OpenCode 1.18.27、Python 3.12/3.13。
 
 ```bash
 git clone https://github.com/Yulia2233/cad-code.git
 cd cad-code
 npm install -g opencode-ai@1.18.27
 npm ci
-npm run setup -- --python python3.12
+npm run setup -- --python python3.12   # Windows 可用: npm run setup -- --python python
 ./cad-code --credentials /absolute/path/provider.json
 ```
+
+Windows 下可使用 `.\cad-code.cmd --web --credentials path\to\provider.json` 启动网页工作台；若上游模型使用 Chat Completions 协议（如智谱 BigModel），启动前设置 `CAD_CODE_WIRE_API=chat`。
+
+## Web 单实体 / 多实体一键重建
+
+网页端（`http://127.0.0.1:8772`）在对话框下方提供两个专用入口：
+
+- **`▶ 导入单实体 STEP`**：上传单实体 `.step` / `.stp` 文件后，自动运行 `stepir.py` 解析并校验 `solids == 1`，自动创建会话工作区（复制 `input/target.step` 与 `input/target.ir.jsonl`）并发送标准 `TASK RULES` 提示词立即开始重建与 `stepeval.py` 验证。
+- **`📦 导入多实体 STEP`**：上传多实体 `.step` / `.stp` 文件后，通过 `tools/multisolid_split_merge.py` 基于 `OCP` 自动拆分为独立的单实体零件并生成各自 `target.ir.jsonl`：
+  - 页面展示所有单实体卡片（尺寸、面数、体积与状态），可点击任意单实体的 **`生成`** 开始独立重建，或点击 **`查看会话`** 进入对应对话；
+  - 可通过标题栏 **`← 返回多实体页面`** 或顶部 **`多实体项目`** 按钮随时返回多实体视图；
+  - 当所有单实体状态均变为 **`已生成`** 后，页面自动调用程序化合并（也可点击顶部 **`合并所有实体`** 按钮手动触发），将所有单实体重建出的 `out/model.step` 合并为完整 `merged.step` 并提供 **`↓ 下载合并后 STEP`**。
 
 API 文件格式如下；也支持 `ccvibe.settings` 包装格式。当前本机配置使用 `~/.secrets/cad-code-qwen-v8.json`，文件权限为 `0600`，密钥不会写入项目：
 

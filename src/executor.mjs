@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 import readline from 'node:readline';
 import {ROOT,REPO,RUNTIME,PYTHON,SKILL,sessionDir} from './paths.mjs';
 import {prepareSessionWorkspace} from './workspace.mjs';
@@ -20,15 +20,28 @@ function worker(sessionID,readOnlyRoots=[]) {
   assertSessionAvailable(sessionID);
   const work=prepareSessionWorkspace(sessionID);
   for(const d of ['.tmp','.home'])fs.mkdirSync(path.join(work,d),{recursive:true});
-  const env={PATH:path.dirname(PYTHON)+':/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',HOME:path.join(work,'.home'),TMPDIR:path.join(work,'.tmp'),LANG:'en_US.UTF-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',OMP_NUM_THREADS:'2',MPLCONFIGDIR:path.join(work,'.tmp/mpl'),SIMPLECAD_VTK_RENDER_LOCK:path.join(work,'.tmp/vtk-render.lock'),CAD_CODE_WORK:work,CAD_CODE_READONLY:JSON.stringify(readOnlyRoots),CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL};
-  let executable='/usr/bin/sandbox-exec',args=['-p',sandboxProfile(work,readOnlyRoots),process.env.CAD_CODE_NODE||process.execPath,path.join(ROOT,'src/worker.mjs')];
-  if(process.platform==='linux'){
+  const isWin=process.platform==='win32';
+  const env=isWin?{
+    ...process.env,
+    PATH:path.dirname(PYTHON)+';'+(process.env.PATH||''),
+    HOME:path.join(work,'.home'),USERPROFILE:path.join(work,'.home'),
+    TMPDIR:path.join(work,'.tmp'),TEMP:path.join(work,'.tmp'),TMP:path.join(work,'.tmp'),
+    LANG:'en_US.UTF-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',OMP_NUM_THREADS:'2',
+    MPLCONFIGDIR:path.join(work,'.tmp/mpl'),SIMPLECAD_VTK_RENDER_LOCK:path.join(work,'.tmp/vtk-render.lock'),
+    CAD_CODE_WORK:work,CAD_CODE_READONLY:JSON.stringify(readOnlyRoots),CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL
+  }:{PATH:path.dirname(PYTHON)+':/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',HOME:path.join(work,'.home'),TMPDIR:path.join(work,'.tmp'),LANG:'en_US.UTF-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',OMP_NUM_THREADS:'2',MPLCONFIGDIR:path.join(work,'.tmp/mpl'),SIMPLECAD_VTK_RENDER_LOCK:path.join(work,'.tmp/vtk-render.lock'),CAD_CODE_WORK:work,CAD_CODE_READONLY:JSON.stringify(readOnlyRoots),CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL};
+  const nodeBin=process.env.CAD_CODE_NODE||process.execPath;
+  let executable='/usr/bin/sandbox-exec',args=['-p',sandboxProfile(work,readOnlyRoots),nodeBin,path.join(ROOT,'src/worker.mjs')];
+  if(isWin){
+    executable=nodeBin;
+    args=[path.join(ROOT,'src/worker.mjs')];
+  }else if(process.platform==='linux'){
     if(!process.env.CAD_CODE_BWRAP)throw Error('Linux requires CAD_CODE_BWRAP; refusing an unsandboxed worker');
     env.CAD_CODE_BWRAP=process.env.CAD_CODE_BWRAP;
     executable=PYTHON;
-    args=['-I',path.join(ROOT,'src/linux-sandbox.py'),'worker','--work',work,'--node',process.env.CAD_CODE_NODE||process.execPath,'--readonly',JSON.stringify(readOnlyRoots)];
+    args=['-I',path.join(ROOT,'src/linux-sandbox.py'),'worker','--work',work,'--node',nodeBin,'--readonly',JSON.stringify(readOnlyRoots)];
   }else if(process.platform!=='darwin')throw Error('Unsupported CAD worker platform');
-  const child=spawn(executable,args,{cwd:work,env,stdio:['pipe','pipe','pipe']});
+  const child=spawn(executable,args,{cwd:work,env,stdio:['pipe','pipe','pipe'],windowsHide:isWin});
   const workerFile=path.join(RUNTIME,'workers',sessionID+'.json');fs.mkdirSync(path.dirname(workerFile),{recursive:true});fs.writeFileSync(workerFile,JSON.stringify({sessionID,pid:child.pid}),{mode:0o600});
   const w={child,pending:new Map(),seq:0,stderr:''};workers.set(sessionID,w);
   child.stderr.on('data',b=>{w.stderr+=b;});
@@ -55,7 +68,7 @@ export async function executeCode(sessionID,code,signal,readOnlyRoots=[]) {
     w.child.stdin.write(JSON.stringify({id,code})+'\n');
   });
 }
-export function stopSession(id){const w=workers.get(id);if(w){workers.delete(id);w.child.stdin.end();}}
+export function stopSession(id){const w=workers.get(id);if(w){workers.delete(id);try{w.child.stdin.end();}catch{}if(process.platform==='win32'&&w.child.pid){spawnSync('taskkill',['/PID',String(w.child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true});}}}
 export function stopWorkers(){for(const w of workers.values())w.child.stdin.end();}
 const cancellationDir=path.join(RUNTIME,'cancel');fs.mkdirSync(cancellationDir,{recursive:true});
 const watcher=fs.watch(cancellationDir,(_,id)=>{if(typeof id==='string'&&/^ses_[\w-]+$/.test(id))stopSession(id);});watcher.unref();

@@ -1,6 +1,6 @@
 /* CAD Code local UI. Dynamic content is rendered with text nodes, never HTML. */
 const $ = id => document.getElementById(id);
-const state = {id:null,sessions:[],data:null,config:null,folds:new Map(),messageFingerprint:'',fileFingerprint:'',questionFingerprint:'',selectedFile:null,previewFingerprint:'',requestGeneration:0,polling:false,sending:false,creating:null,pendingUntil:0,uploads:[]};
+const state = {id:null,sessions:[],data:null,config:null,folds:new Map(),messageFingerprint:'',fileFingerprint:'',questionFingerprint:'',selectedFile:null,previewFingerprint:'',requestGeneration:0,polling:false,sending:false,creating:null,pendingUntil:0,uploads:[],multiProject:null};
 const fmtSize = n => n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';
 const readable = value => typeof value==='string'?value:JSON.stringify(value,null,2);
 function el(tag,className,text){const e=document.createElement(tag);if(className)e.className=className;if(text!==undefined)e.textContent=text;return e;}
@@ -184,12 +184,121 @@ async function upload(files){
         $('prompt').focus();
         return;
       }
-    }catch(error){showError(error);return;}
+    }catch{}
   }
   // END MULTISOLID ADDITIVE UPLOAD
   if(!files?.length)return;$('uploadButton').disabled=true;clearError();
   try{if(!state.id)await newSession();const id=state.id;for(const file of files){if(file.size>32*1024*1024)throw Error('文件超过32MB：'+file.name);const value=await api('/api/sessions/'+id+'/upload?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});if(id===state.id&&!state.uploads.includes(value.path))state.uploads.push(value.path);}renderUploadChips();await refresh();$('prompt').focus();}
   catch(e){showError(e);}finally{$('uploadButton').disabled=false;$('fileInput').value='';}
+}
+async function startSingleStep(files){
+  const file=files?.[0];if(!file)return;
+  if(file.size>32*1024*1024){showError(Error('文件超过32MB：'+file.name));$('singleStepInput').value='';return;}
+  $('singleStepButton').disabled=true;clearError();
+  try{
+    const res=await api('/api/single-step/start?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});
+    showMultiSolidPanel(false);
+    await loadSessions();state.id=null;await chooseSession(res.session_id);state.pendingUntil=Date.now()+4000;await refresh();
+  }catch(e){showError(e);}finally{$('singleStepButton').disabled=false;$('singleStepInput').value='';}
+}
+function showMultiSolidPanel(visible){
+  $('multiSolidPanel').hidden=!visible;
+  $('conversationScroll').hidden=visible;
+  $('composer').hidden=visible;
+  $('backToMultiSolid').hidden=visible||!state.multiProject;
+  if(state.multiProject)$('openMultiSolid').hidden=false;
+}
+function renderMultiSolidProject(project){
+  state.multiProject=project;
+  if(!project){showMultiSolidPanel(false);return;}
+  showMultiSolidPanel(true);
+  const doneCount=project.parts.filter(p=>p.status==='generated').length;
+  const allDone=project.parts.length>0&&doneCount===project.parts.length;
+  $('multiSolidTitle').textContent=`${project.filename}（共 ${project.solid_count} 个单实体）`;
+  $('multiSolidSummary').textContent=`已生成 ${doneCount} / ${project.parts.length} 个单实体`;
+  const mergeBtn=$('multiSolidMergeBtn');
+  mergeBtn.disabled=!allDone;
+  mergeBtn.textContent=project.merged_step?'重新合并所有实体':'合并所有实体';
+  const dl=$('multiSolidDownload');
+  if(project.merged_step){
+    dl.href='/api/multisolid-local/projects/'+encodeURIComponent(project.project_id)+'/download';
+    dl.hidden=false;
+  }else{dl.hidden=true;}
+  const banner=$('multiSolidBanner');
+  if(project.merged_step){
+    banner.className='multisolid-banner ready';
+    banner.textContent=`✅ 所有 ${project.parts.length} 个单实体均已生成，并已程序化合并为 merged.step（${fmtSize(project.merge_info?.bytes||0)}）。`;
+  }else if(allDone){
+    banner.className='multisolid-banner';
+    banner.textContent='所有单实体已生成，点击上方“合并所有实体”即可程序化合并。';
+  }else{
+    banner.className='multisolid-banner';
+    banner.textContent='点击任意单实体的“生成”按钮开始重建；全部实体状态变为“已生成”后将自动程序化合并。';
+  }
+  const statusMap={pending:'待生成',running:'生成中…',generated:'已生成',stopped:'已停止 / 未产出'};
+  const grid=$('multiSolidGrid');
+  grid.replaceChildren(...project.parts.map(part=>{
+    const card=el('div','multisolid-card status-'+(part.status||'pending'));
+    const top=el('div','multisolid-card-top');
+    top.append(el('strong',null,part.label),el('span','multisolid-badge',statusMap[part.status]||part.status));
+    const meta=el('div','multisolid-meta');
+    meta.textContent=`尺寸: ${part.size.join(' × ')} mm · 面数: ${part.faces} · 体积: ${part.volume}`;
+    const actions=el('div','multisolid-card-actions');
+    const genBtn=el('button','upload-button single-step-button',part.status==='generated'?'重新生成':part.status==='running'?'生成中…':'生成');
+    genBtn.type='button';genBtn.disabled=part.status==='running';
+    genBtn.addEventListener('click',async()=>{
+      genBtn.disabled=true;clearError();
+      try{
+        const res=await post(`/api/multisolid-local/projects/${encodeURIComponent(project.project_id)}/parts/${encodeURIComponent(part.id)}/generate`,{});
+        renderMultiSolidProject(res.project);
+        await loadSessions();
+      }catch(e){showError(e);genBtn.disabled=false;}
+    });
+    actions.append(genBtn);
+    if(part.session_id){
+      const viewBtn=el('button','upload-button','查看会话');
+      viewBtn.type='button';
+      viewBtn.addEventListener('click',async()=>{
+        showMultiSolidPanel(false);
+        await loadSessions();
+        await chooseSession(part.session_id);
+      });
+      actions.append(viewBtn);
+    }
+    card.append(top,meta,actions);
+    return card;
+  }));
+}
+async function startMultiStep(files){
+  const file=files?.[0];if(!file)return;
+  if(file.size>32*1024*1024){showError(Error('文件超过32MB：'+file.name));$('multiStepInput').value='';return;}
+  $('multiStepButton').disabled=true;clearError();
+  try{
+    const res=await api('/api/multisolid-local/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});
+    localStorage.setItem('cad-code-multi-project',res.project.project_id);
+    renderMultiSolidProject(res.project);
+  }catch(e){showError(e);}finally{$('multiStepButton').disabled=false;$('multiStepInput').value='';}
+}
+async function openMultiSolid(){
+  clearError();
+  if(state.multiProject){
+    renderMultiSolidProject(state.multiProject);
+    await refreshMultiSolid();
+    return;
+  }
+  const savedId=localStorage.getItem('cad-code-multi-project');
+  const list=await api('/api/multisolid-local/projects');
+  const target=list.projects?.find(p=>p.project_id===savedId)||list.projects?.[0];
+  if(!target)throw Error('暂无多实体项目');
+  const res=await api('/api/multisolid-local/projects/'+encodeURIComponent(target.project_id));
+  renderMultiSolidProject(res.project);
+}
+async function refreshMultiSolid(){
+  if(!state.multiProject||$('multiSolidPanel').hidden)return;
+  try{
+    const res=await api('/api/multisolid-local/projects/'+encodeURIComponent(state.multiProject.project_id));
+    renderMultiSolidProject(res.project);
+  }catch{}
 }
 let dataToken='';
 async function openDataManager(){
@@ -256,7 +365,7 @@ $('providerForm').addEventListener('submit',async event=>{
 $('newSession').addEventListener('click',()=>newSession().catch(()=>{}));$('composer').addEventListener('submit',submit);
 $('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();submit();}});
 $('stopButton').addEventListener('click',async()=>{if(!state.id)return;$('stopButton').disabled=true;try{await post('/api/sessions/'+state.id+'/stop',{});state.pendingUntil=0;await refresh();}catch(e){showError(e);}finally{$('stopButton').disabled=false;}});
-$('uploadButton').addEventListener('click',()=>$('fileInput').click());$('fileInput').addEventListener('change',()=>upload($('fileInput').files));$('dismissError').addEventListener('click',clearError);
+$('uploadButton').addEventListener('click',()=>$('fileInput').click());$('fileInput').addEventListener('change',()=>upload($('fileInput').files));$('singleStepButton').addEventListener('click',()=>$('singleStepInput').click());$('singleStepInput').addEventListener('change',()=>startSingleStep($('singleStepInput').files));$('multiStepButton').addEventListener('click',()=>$('multiStepInput').click());$('multiStepInput').addEventListener('change',()=>startMultiStep($('multiStepInput').files));$('multiSolidBack').addEventListener('click',()=>showMultiSolidPanel(false));$('backToMultiSolid').addEventListener('click',()=>openMultiSolid().catch(showError));$('openMultiSolid').addEventListener('click',()=>openMultiSolid().catch(showError));$('multiSolidMergeBtn').addEventListener('click',async()=>{if(!state.multiProject)return;$('multiSolidMergeBtn').disabled=true;clearError();try{const res=await post(`/api/multisolid-local/projects/${encodeURIComponent(state.multiProject.project_id)}/merge`,{});renderMultiSolidProject(res.project);}catch(e){showError(e);$('multiSolidMergeBtn').disabled=false;}});$('dismissError').addEventListener('click',clearError);
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newSession().catch(()=>{});}});
 for(const b of document.querySelectorAll('[data-example]'))b.addEventListener('click',()=>{$('prompt').value=b.dataset.example;$('prompt').focus();});
 window.addEventListener('hashchange',()=>{const id=decodeURIComponent(location.hash.slice(1));if(/^ses_[\w-]+$/.test(id))chooseSession(id);});
@@ -265,9 +374,9 @@ function displayConfig(config){
   $('modelOptions').textContent='temperature '+config.temperature+' · '+Math.round(config.context/1024)+'k · '+(config.vision?'vision':'text')+' · 思考'+(config.thinking===false?'关闭':'开启');
 }
 async function init(){
-  try{displayConfig(await api('/api/config'));await loadSessions();online(true);if(state.config.providerConfigured===false)await openProviderSettings();const hash=decodeURIComponent(location.hash.slice(1)),saved=localStorage.getItem('cad-code-session');const id=[hash,saved].find(x=>state.sessions.some(s=>s.id===x));if(id)await chooseSession(id);}
+  try{displayConfig(await api('/api/config'));await loadSessions();online(true);if(state.config.providerConfigured===false)await openProviderSettings();const ms=await api('/api/multisolid-local/projects').catch(()=>({projects:[]}));if(ms.projects?.length){$('openMultiSolid').hidden=false;const savedMs=localStorage.getItem('cad-code-multi-project');const found=ms.projects.find(p=>p.project_id===savedMs)||ms.projects[0];if(found)state.multiProject=found;}const hash=decodeURIComponent(location.hash.slice(1)),saved=localStorage.getItem('cad-code-session');const id=[hash,saved].find(x=>state.sessions.some(s=>s.id===x));if(id)await chooseSession(id);if(state.multiProject)$('backToMultiSolid').hidden=!$('multiSolidPanel').hidden;}
   catch(e){online(false);showError(e);}
   let iteration=0;
-  setInterval(async()=>{if(state.polling)return;state.polling=true;try{await refresh();if(++iteration%5===0){await loadSessions();displayConfig(await api('/api/config'));}}catch(e){online(false);}finally{state.polling=false;}},1000);
+  setInterval(async()=>{if(state.polling)return;state.polling=true;try{await refresh();await refreshMultiSolid();if(++iteration%5===0){await loadSessions();displayConfig(await api('/api/config'));}}catch(e){online(false);}finally{state.polling=false;}},1000);
 }
 init();

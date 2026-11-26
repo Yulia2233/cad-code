@@ -9,7 +9,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="CAD Code 首页"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m16 3 12 7v13l-12 7L4 23V10Z M4 10l12 7 12-7 M16 17v13 M10 6l12 7v7"/></svg><span>CAD<span class="brand-light"> Code</span></span><span class="local-tag">LOCAL</span></a>
-    <div class="top-meta"><button id="dataSettings" class="settings-button" type="button">数据管理</button><button id="apiSettings" class="settings-button" type="button">API 配置</button><span id="modelName">连接模型…</span><span class="divider"></span><span id="skillName">SimpleCADAPI</span><span id="connection" class="connection"><i></i>连接中</span></div>
+    <div class="top-meta"><button id="openMultiSolid" class="settings-button" type="button" hidden>多实体项目</button><button id="dataSettings" class="settings-button" type="button">数据管理</button><button id="apiSettings" class="settings-button" type="button">API 配置</button><span id="modelName">连接模型…</span><span class="divider"></span><span id="skillName">SimpleCADAPI</span><span id="connection" class="connection"><i></i>连接中</span></div>
   </header>
 
   <div class="workspace">
@@ -21,8 +21,24 @@
     </aside>
 
     <main class="chat-pane">
-      <div class="chat-head"><div><span class="eyebrow">建模工作台</span><h1 id="sessionTitle">开始一个 CAD 任务</h1></div><div class="head-actions"><span id="taskStatus" class="task-status">就绪</span><a id="exportSession" class="icon-button" hidden title="下载完整会话 JSON" aria-label="下载完整会话 JSON">↓</a></div></div>
+      <div class="chat-head"><div><span class="eyebrow">建模工作台</span><h1 id="sessionTitle">开始一个 CAD 任务</h1></div><div class="head-actions"><button id="backToMultiSolid" class="settings-button" type="button" hidden>← 返回多实体页面</button><span id="taskStatus" class="task-status">就绪</span><a id="exportSession" class="icon-button" hidden title="下载完整会话 JSON" aria-label="下载完整会话 JSON">↓</a></div></div>
       <div id="errorBanner" class="error-banner" role="alert" hidden><span id="errorText"></span><button id="dismissError" aria-label="关闭错误提示">×</button></div>
+      <section id="multiSolidPanel" class="multisolid-panel" hidden>
+        <div class="multisolid-head">
+          <div>
+            <span class="eyebrow">多实体拆解与程序化合并</span>
+            <h2 id="multiSolidTitle">多实体项目</h2>
+            <p id="multiSolidSummary" class="multisolid-summary"></p>
+          </div>
+          <div class="multisolid-actions">
+            <button id="multiSolidMergeBtn" type="button" class="send-button" disabled>合并所有实体</button>
+            <a id="multiSolidDownload" class="upload-button single-step-button" hidden>↓ 下载合并后 STEP</a>
+            <button id="multiSolidBack" type="button" class="upload-button">返回对话</button>
+          </div>
+        </div>
+        <div id="multiSolidBanner" class="multisolid-banner"></div>
+        <div id="multiSolidGrid" class="multisolid-grid"></div>
+      </section>
       <div id="conversationScroll" class="conversation-scroll">
         <section id="welcome" class="welcome">
           <div class="welcome-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="m24 5 17 10v19L24 44 7 34V15Z M7 15l17 10 17-10 M24 25v19 M16 10l17 10v10"/></svg></div>
@@ -30,8 +46,8 @@
           <h2>你想做一个什么零件？</h2>
           <p>描述尺寸与结构，或上传 STEP、图片和参考文件。<br>在这里查看建模过程、运行结果与生成产物。</p>
           <div class="example-prompts">
-            <button data-example="创建一个 60×40×8 mm 的矩形安装板，四个角各有一个直径 5 mm 的通孔，孔心距离相邻两边均为 8 mm。尺寸和形状已经确认，无其他功能要求。请使用 SimpleCADAPI 2.2.5 建模，导出 STEP、STL 和等测预览图，并检查模型有效性。"><span class="example-icon">▱</span><span>四孔安装板<small>尺寸明确 · 建模与导出</small></span><span class="arrow">↗</span></button>
-            <button data-example="创建一个外径 30 mm、内径 16 mm、高 20 mm 的圆筒，轴线为 Z 轴，底面位于 Z=0。形状和尺寸已经确认。请使用 SimpleCADAPI 2.2.5，导出 STEP、STL 和等测预览图，并检查模型有效性。"><span class="example-icon">◎</span><span>参数化圆筒<small>圆柱与孔 · 检查与渲染</small></span><span class="arrow">↗</span></button>
+            <button data-example="创建一个 60×40×8 mm 的矩形安装板，四个角各有一个直径 5 mm 的通孔，孔心距离相邻两边均为 8 mm。尺寸和形状已经确认，无其他功能要求。请使用 SimpleCADAPI 2.2.7 建模，导出 STEP、STL 和等测预览图，并检查模型有效性。"><span class="example-icon">▱</span><span>四孔安装板<small>尺寸明确 · 建模与导出</small></span><span class="arrow">↗</span></button>
+            <button data-example="创建一个外径 30 mm、内径 16 mm、高 20 mm 的圆筒，轴线为 Z 轴，底面位于 Z=0。形状和尺寸已经确认。请使用 SimpleCADAPI 2.2.7，导出 STEP、STL 和等测预览图，并检查模型有效性。"><span class="example-icon">◎</span><span>参数化圆筒<small>圆柱与孔 · 检查与渲染</small></span><span class="arrow">↗</span></button>
             <button data-example="我想重建一个 STEP 零件。请先检查我上传的 input/ 文件，读取完整 simplecadapi skill，分析几何结构，给出重建方案。"><span class="example-icon">⌘</span><span>从 STEP 开始<small>先上传文件 · 分析与重建</small></span><span class="arrow">↗</span></button>
           </div>
         </section>
@@ -42,8 +58,10 @@
       <form id="composer" class="composer">
         <div id="uploadChips" class="upload-chips" hidden></div>
         <textarea id="prompt" placeholder="描述你的零件、尺寸，或希望修改的地方…" rows="3" aria-label="给 CAD Agent 的消息"></textarea>
-        <div class="composer-actions"><div><button id="uploadButton" type="button" class="upload-button"><span>＋</span> 添加文件</button><span id="composerHint">Enter 发送 · Shift + Enter 换行</span></div><div><button id="stopButton" type="button" class="stop-button" hidden><span>■</span> 停止</button><button id="sendButton" type="submit" class="send-button">发送 <span>↑</span></button></div></div>
+        <div class="composer-actions"><div><button id="uploadButton" type="button" class="upload-button"><span>＋</span> 添加文件</button><button id="singleStepButton" type="button" class="upload-button single-step-button"><span>▶</span> 导入单实体 STEP</button><button id="multiStepButton" type="button" class="upload-button multi-step-button"><span>📦</span> 导入多实体 STEP</button><span id="composerHint">Enter 发送 · Shift + Enter 换行</span></div><div><button id="stopButton" type="button" class="stop-button" hidden><span>■</span> 停止</button><button id="sendButton" type="submit" class="send-button">发送 <span>↑</span></button></div></div>
         <input id="fileInput" type="file" multiple hidden accept=".step,.stp,.png,.jpg,.jpeg,.pdf,.py,.json,.jsonl,.dxf,.stl,.scadpkg,.md,.txt">
+        <input id="singleStepInput" type="file" hidden accept=".step,.stp">
+        <input id="multiStepInput" type="file" hidden accept=".step,.stp">
       </form>
       <div class="chat-foot"><span>执行真实工具，产物保存在本地工作目录。</span><span id="modelOptions">temperature 1 · 256k · vision</span></div>
     </main>

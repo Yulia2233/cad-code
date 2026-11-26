@@ -2,6 +2,11 @@
 
 ## Unreleased — 2026-11-02
 
+- 2026-11-26：新增原生 Windows 支持与 Web 单/多实体工作流：
+  - **Windows 兼容**：新增 `cad-code.cmd` 启动脚本；`src/paths.mjs` 适配 `.runtime/python/Scripts/python.exe` 与盘符大小写校验；`scripts/setup.mjs` 支持 `win32`；`src/executor.mjs` 与 `src/worker.mjs` 适配 Windows 进程启动、Git Bash / CMD 自动发现与 `taskkill /T /F` 进程树终止；`src/server.mjs` 与 `src/cli.mjs` 使用 `pathToFileURL()` 并兼容 `opencode.cmd`；
+  - **Web 单实体 STEP 一键重建**：新增 `POST /api/single-step/start` 与 **`▶ 导入单实体 STEP`** 按钮，上传后自动运行 `stepir.py`、校验单实体、创建工作区并按标准 `TASK RULES` 提示词启动重建；
+  - **Web 多实体拆解与程序化合并**：新增 `tools/multisolid_split_merge.py`（基于 `OCP` 拆分多实体 STEP、提取几何指标并合并重建出的 `out/model.step`）、`/api/multisolid-local/*` 接口及前端多实体管理面板（支持单实体选择生成、查看会话与返回多实体页面、全部生成后自动程序化合并、手动 **`合并所有实体`** 按钮及 **`↓ 下载合并后 STEP`**）。
+
 - 2026-11-13: Shorten static assembly turns with an assembly-only delivery helper for build, residual inspection and exports. The runtime prompt avoids agent-written packaging scripts and redundant successful checks; independent acceptance remains in the controller.
 
 - 2026-11-13: Assembly sessions use a bounded context index with paged part/occurrence facts and a capped candidate list. The controller creates a source-pose scaffold with one grounded reference, occurrence-specific connectors, and a fixed spanning tree; evidenced motion hypotheses can replace individual fixed edges. Preserve the original single-solid code, prompt, skill, and trajectory format. Preprocessing bounds retained AABB relation rows; it does not infer mechanical joints.

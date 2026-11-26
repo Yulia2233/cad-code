@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {ROOT,PYTHON} from '../src/paths.mjs';
-if(!['darwin','linux'].includes(process.platform))throw Error('Unsupported platform');
+if(!['darwin','linux','win32'].includes(process.platform))throw Error('Unsupported platform');
 if(process.platform==='linux'&&!process.env.CAD_CODE_BWRAP)throw Error('Linux setup requires CAD_CODE_BWRAP');
-const args=process.argv.slice(2),i=args.indexOf('--python');const source=i<0?'python3':args[i+1];
-const run=(exe,args)=>{const r=spawnSync(exe,args,{stdio:'inherit'});if(r.status!==0)throw Error(exe+' failed ('+r.status+')');};
+const args=process.argv.slice(2),i=args.indexOf('--python');const source=i<0?(process.platform==='win32'?'python':'python3'):args[i+1];
+const run=(exe,args,opts={})=>{const useShell=process.platform==='win32'&&(/^(opencode|npm|npx)$/i.test(exe)||/\.(cmd|bat)$/i.test(exe));const r=spawnSync(exe,args,{stdio:'inherit',...(useShell?{shell:true}:{}),...opts});if(r.status!==0)throw Error(exe+' failed ('+r.status+')');};
 run(source,['-c',"import sys; assert sys.version_info[:2] in [(3,12),(3,13)], 'Use Python3.12 or3.13 for the SimpleCADAPI CAD wheels'"]);
 run(process.env.OPENCODE_BIN||'opencode',['--version']);
 if(!fs.existsSync(PYTHON)){fs.mkdirSync(path.dirname(path.dirname(PYTHON)),{recursive:true});run(source,['-m','venv',path.dirname(path.dirname(PYTHON))]);}

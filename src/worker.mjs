@@ -3,14 +3,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import readline from 'node:readline';
-import {spawn} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 import {inside} from './paths.mjs';
 const cwd = process.env.CAD_CODE_WORK;
 const readOnlyRoots=JSON.parse(process.env.CAD_CODE_READONLY||'[]');
 const sessions = new Map();
 let nextSession = 1;
 function record(event) {fs.appendFileSync(path.join(cwd, '.cad-events.jsonl'), JSON.stringify({time:new Date().toISOString(),...event})+'\n');}
-function stop(job,force=false) {try {process.kill(-job.child.pid,force?'SIGKILL':'SIGTERM');} catch(e){if(e.code!=='ESRCH')record({kind:'command_stop_error',id:job.id,error:e.message});}}
+function findWinShell(requested) {
+  if(requested)return requested;
+  if(process.env.CAD_CODE_SHELL)return process.env.CAD_CODE_SHELL;
+  for(const c of ['C:\\Program Files\\Git\\bin\\bash.exe','D:\\git\\Git\\bin\\bash.exe','C:\\Program Files (x86)\\Git\\bin\\bash.exe'])if(fs.existsSync(c))return c;
+  const w=spawnSync('where.exe',['git.exe'],{encoding:'utf8',windowsHide:true});
+  if(w.status===0){const g=w.stdout.split(/\r?\n/).map(s=>s.trim()).find(Boolean);if(g){const b=path.resolve(path.dirname(g),'../bin/bash.exe');if(fs.existsSync(b))return b;}}
+  return process.env.COMSPEC||'cmd.exe';
+}
+function stop(job,force=false) {try {if(process.platform==='win32'){if(job.child.pid)spawnSync('taskkill',['/PID',String(job.child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true});else job.child.kill();}else process.kill(-job.child.pid,force?'SIGKILL':'SIGTERM');} catch(e){if(e.code!=='ESRCH')record({kind:'command_stop_error',id:job.id,error:e.message});}}
 function sliceOutput(job, maxTokens=10000) {
   const output = job.output.slice(job.cursor);job.cursor=job.output.length;
   const cap = Math.max(256, Math.min(100000, Number(maxTokens)||10000))*4;
@@ -33,7 +41,10 @@ const tools = {
     if (args.tty) throw Error('PTY mode is not implemented in this local prototype; use a noninteractive command and poll session_id.');
     const work=inside(cwd,args.workdir||'.');
     const id=nextSession++;
-    const child=spawn(args.shell||'/bin/bash',[args.login?'-lc':'-c',args.cmd],{cwd:work,env:process.env,detached:true,stdio:['pipe','pipe','pipe']});
+    const isWin=process.platform==='win32';
+    const shellExe=isWin?findWinShell(args.shell):(args.shell||'/bin/bash');
+    const shellArgs=/bash(\.exe)?$/i.test(shellExe)?[args.login?'-lc':'-c',args.cmd]:['/d','/s','/c',args.cmd];
+    const child=spawn(shellExe,shellArgs,{cwd:work,env:process.env,detached:!isWin,windowsHide:isWin,stdio:['pipe','pipe','pipe']});
     const job={id,child,output:'',cursor:0,done:false,exitCode:null};
     job.finished=new Promise(resolve=>{
       child.on('error',e=>{job.output+=e.message;job.done=true;job.exitCode=127;resolve();});

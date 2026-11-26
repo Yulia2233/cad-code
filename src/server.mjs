@@ -2,7 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {spawn} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
+import {spawn,spawnSync} from 'node:child_process';
 import {ROOT,RUNTIME,WORKSPACE,PYTHON,SKILL,sessionDir,inside} from './paths.mjs';
 import {sseDecoder,secretRedactor} from './streams.mjs';
 import {qwenReasoningStream} from './reasoning-stream.mjs';
@@ -111,7 +112,7 @@ const dirs={config:path.join(RUNTIME,'xdg/config'),data:path.join(RUNTIME,'xdg/d
 for(const p of Object.values(dirs))fs.mkdirSync(p,{recursive:true});
 const opencodeConfig={
   $schema:'https://opencode.ai/config.json',model:'cad-local/'+model,small_model:'cad-local/'+model,default_agent:'cad-code',
-  plugin:[new URL('file://'+path.join(ROOT,'src/plugin.mjs')).href],instructions:[],
+  plugin:[pathToFileURL(path.join(ROOT,'src/plugin.mjs')).href],instructions:[],
   enabled_providers:['cad-local'],compaction:{auto:true,prune:false,reserved:1024},
   provider:{'cad-local':{name:'CAD Code · '+model,npm:wireAPI==='responses'?'@ai-sdk/openai':'@ai-sdk/openai-compatible',options:{baseURL:`http://127.0.0.1:${gatewayPort}/v1`,apiKey:gatewayToken},models:{[model]:{name:model,tool_call:true,reasoning:true,attachment:true,modalities:{input:['text','image'],output:['text']},limit:{context:262144,input:262144,output:16384}}}}},
   agent:{'cad-code':{description:'使用 SimpleCADAPI 完成建模、检查、导出和渲染',mode:'primary',model:'cad-local/'+model,temperature:1,prompt:MAIN_PROMPT_MARKER,tools:{'*':false,exec:true,question:true,todowrite:true,task:true},permission:{'*':'deny',exec:'allow',question:'allow',todowrite:'allow',task:{'*':'deny','cad-review':'allow'}}},'cad-review':{description:'独立检查父任务 out/ 下的真实渲染与验证结果，父产物只读。',mode:'subagent',model:'cad-local/'+model,temperature:1,prompt:REVIEW_PROMPT_MARKER,tools:{'*':false,exec:true},permission:{'*':'deny',exec:'allow'}},compaction:{model:'cad-local/'+model,temperature:1}},
@@ -128,7 +129,10 @@ const configPath=path.join(RUNTIME,'opencode.json');fs.writeFileSync(configPath,
 // This isolated project stops parent-project instruction discovery.
 if(!fs.existsSync(path.join(WORKSPACE,'.git')))await new Promise((resolve,reject)=>{const p=spawn('git',['init','--quiet'],{cwd:WORKSPACE,stdio:'ignore'});p.on('exit',c=>c===0?resolve():reject(Error('git init failed')));});
 const ocLog=fs.openSync(path.join(RUNTIME,'opencode.log'),'a');
-const ocProcess=spawn(process.env.OPENCODE_BIN||'opencode',['serve','--hostname','127.0.0.1','--port',String(ocPort)],{cwd:WORKSPACE,env:{...process.env,OPENCODE_CONFIG:configPath,OPENCODE_CONFIG_DIR:dirs.config,XDG_CONFIG_HOME:dirs.config,XDG_DATA_HOME:dirs.data,XDG_STATE_HOME:dirs.state,XDG_CACHE_HOME:dirs.cache,OPENCODE_SERVER_PASSWORD:ocPassword,CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL,CAD_CODE_NODE:process.env.CAD_CODE_NODE||process.execPath,OPENCODE_DISABLE_CLAUDE_CODE:'true'},stdio:['ignore',ocLog,ocLog]});
+const ocBin=process.env.OPENCODE_BIN||'opencode';
+const ocServeArgs=['serve','--hostname','127.0.0.1','--port',String(ocPort)];
+const ocOpts={cwd:WORKSPACE,env:{...process.env,OPENCODE_CONFIG:configPath,OPENCODE_CONFIG_DIR:dirs.config,XDG_CONFIG_HOME:dirs.config,XDG_DATA_HOME:dirs.data,XDG_STATE_HOME:dirs.state,XDG_CACHE_HOME:dirs.cache,OPENCODE_SERVER_PASSWORD:ocPassword,CAD_CODE_PYTHON:PYTHON,CAD_CODE_SKILL:SKILL,CAD_CODE_NODE:process.env.CAD_CODE_NODE||process.execPath,OPENCODE_DISABLE_CLAUDE_CODE:'true'},stdio:['ignore',ocLog,ocLog],windowsHide:process.platform==='win32'};
+const ocProcess=process.platform==='win32'&&/\.(mjs|js)$/i.test(ocBin)?spawn(process.execPath,[ocBin,...ocServeArgs],ocOpts):spawn(ocBin,ocServeArgs,process.platform==='win32'&&!/\.(exe|com)$/i.test(ocBin)?{...ocOpts,shell:true}:ocOpts);
 let shuttingDown=false;let app;
 function shutdown(){if(shuttingDown)return;shuttingDown=true;ocProcess.kill('SIGTERM');gateway.close();app?.close();setTimeout(()=>process.exit(0),1500).unref();}
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
@@ -161,6 +165,103 @@ async function stopSessionExecution(id){
 }
 const mime=p=>({'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.svg':'image/svg+xml','.json':'application/json','.stl':'model/stl','.step':'application/step','.stp':'application/step','.py':'text/plain; charset=utf-8','.md':'text/plain; charset=utf-8'})[path.extname(p).toLowerCase()]||'application/octet-stream';
 function files(work){let out=[];if(!fs.existsSync(work))return out;function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){if(f.name.startsWith('.')||f.name==='__marimo__'||f.name==='__pycache__'||f.isSymbolicLink())continue;const p=path.join(dir,f.name);if(f.isDirectory())walk(p);else{const stat=fs.statSync(p);out.push({path:path.relative(work,p),size:stat.size,mtime:stat.mtimeMs});}}}walk(work);return out.sort((a,b)=>b.mtime-a.mtime);}
+function buildSingleStepPrompt(){
+  const scaExe=path.join(path.dirname(PYTHON),process.platform==='win32'?'sca.exe':'sca');
+  const stepevalScript=path.join(SKILL,'scripts','stepeval.py');
+  return `TASK RULES:
+- use English for all assistant messages, explanations, reports, and notebook comments;
+- never start a subagent: no task tool, no cad-review;
+- never ask the user: no question tool. Decide yourself and record assumptions in out/report.json.
+
+Reconstruct the CAD part in input/target.step as an editable SimpleCAD notebook with SimpleCADAPI 2.2.7. Your work becomes training data for a model that must write such notebooks from the supplied inputs, so follow the method exactly and keep every step purposeful.
+
+Use the simplecadapi skill and follow its STEP reconstruction workflow (references/workflows/step-reconstruction.md) step by step. input/target.ir.jsonl is the target's STEPIR v6.3 description; read it first, once (its format: references/inspect/stepir.md). The notebook format and API card in that workflow are the code convention.
+
+Deliver under out/:
+1. out/model.py: the notebook in the skill's notebook format, with id "model". It must rebuild the part through SimpleCADAPI modeling operations and must not read target.step, target.ir.jsonl, copied BREP/mesh, or any other target-derived geometry file at run time. Write it directly with tools.apply_patch: no generator script, no string-replacement patch scripts, no debug copies.
+2. out/model.step: the STEP exported from your final out/model.py, made after the last evaluation with
+   "${scaExe}" run out/model.py --out out/model.scadpkg && "${scaExe}" export out/model.scadpkg --format step --output-dir out --overwrite
+3. out/report.json: as the workflow specifies (part_id, riou, evaluations, features, assumptions).
+
+Evaluate with: "${PYTHON}" "${stepevalScript}" out/model.py input/target.step --out eval/N (a new N for each attempt). "ok": true is the acceptance check; keep the best notebook at out/model.py. If the header says more than one solid, write report.json saying so and stop.
+Model the design intent, not just the shape: infer what the part is, its design dimensions and the relations between them (symmetry, tangency, concentric and centred features, patterns), and carry them into the notebook as parameters, expressions of parameters, constrained sketches and dependent feature placement, as the workflow's modelling requirements say. Every "fillet" and "chamfer" line of the IR must become its own modify cell.
+
+When to stop: when stepeval prints "ok": true; or when your feature tree is structurally sound and no clean modelling change can improve it further (what remains would need patch solids, target-fitted surfaces or offsets with no design meaning). Do not stop while a clean change is still raising riou. Then export out/model.step and write out/report.json (with design_intent, the best riou and, if not ok, the regions still off and why).
+
+The input files have been copied to the session workspace: input/target.step, input/target.ir.jsonl. Use these relative paths.`;
+}
+async function startSingleStepSession(title,stepPath,irPath){
+  const s=await oc('/session','POST',{title});
+  const work=prepareSessionWorkspace(s.id);
+  const inputDir=inside(work,'input');fs.mkdirSync(inputDir,{recursive:true});
+  fs.copyFileSync(stepPath,inside(work,'input/target.step'));
+  fs.copyFileSync(irPath,inside(work,'input/target.ir.jsonl'));
+  await oc(`/session/${s.id}/prompt_async`,'POST',{agent:'cad-code',model:{providerID:'cad-local',modelID:routingModel},parts:[{type:'text',text:buildSingleStepPrompt()}]});
+  return s;
+}
+function multiProjectDir(projectId){
+  if(!/^ms_[a-f0-9]+$/.test(projectId||''))throw Error('Invalid project ID');
+  return path.join(WORKSPACE,'multisolid-projects',projectId);
+}
+function readMultiProject(projectDir){
+  const pFile=path.join(projectDir,'project.json');
+  if(!fs.existsSync(pFile))throw Error('Multi-solid project not found');
+  return JSON.parse(fs.readFileSync(pFile,'utf8'));
+}
+function saveMultiProject(projectDir,project){
+  const tmp=path.join(projectDir,'project.json.tmp');
+  fs.writeFileSync(tmp,JSON.stringify(project,null,2));
+  fs.renameSync(tmp,path.join(projectDir,'project.json'));
+}
+function findGeneratedPartStep(sessionId){
+  if(!sessionId)return null;
+  const work=sessionDir(sessionId);
+  for(const rel of ['out/model.step','out/rebuild.step']){
+    const p=path.join(work,rel);
+    if(fs.existsSync(p)&&fs.statSync(p).size>0)return p;
+  }
+  return null;
+}
+function mergeMultiProject(projectDir,project){
+  const stepFiles=[];
+  for(const part of project.parts){
+    const stepFile=findGeneratedPartStep(part.session_id);
+    if(!stepFile)throw Error(`${part.label} 尚未生成可用的 STEP 文件（out/model.step）`);
+    stepFiles.push(stepFile);
+  }
+  const mergedOut=path.join(projectDir,'merged.step');
+  const mergeScript=path.join(ROOT,'tools','multisolid_split_merge.py');
+  const r=spawnSync(PYTHON,[mergeScript,'merge',mergedOut,...stepFiles],{encoding:'utf8',windowsHide:true,timeout:120000});
+  if(r.status!==0)throw Error('合并 STEP 失败: '+(r.stderr||r.stdout||'exit '+r.status).slice(0,500));
+  project.merged_step='merged.step';
+  const lastLine=r.stdout.trim().split(/\r?\n/).pop()||'{}';
+  project.merge_info=JSON.parse(lastLine);
+  saveMultiProject(projectDir,project);
+  return project;
+}
+async function syncMultiProject(projectDir,project,autoMerge=true){
+  let statuses={};
+  try{statuses=await oc('/session/status');}catch{}
+  let changed=false;
+  for(const part of project.parts){
+    const prev=part.status;
+    if(!part.session_id){part.status='pending';}
+    else{
+      const st=statuses[part.session_id]?.type;
+      const stepFile=findGeneratedPartStep(part.session_id);
+      if(st&&st!=='idle'){part.status='running';}
+      else if(stepFile){part.status='generated';part.generated_step=path.relative(WORKSPACE,stepFile);}
+      else{part.status='stopped';}
+    }
+    if(part.status!==prev)changed=true;
+  }
+  const allGenerated=project.parts.length>0&&project.parts.every(p=>p.status==='generated');
+  if(autoMerge&&allGenerated&&(!project.merged_step||!fs.existsSync(path.join(projectDir,project.merged_step)))){
+    try{project=mergeMultiProject(projectDir,project);changed=false;}catch{}
+  }
+  if(changed)saveMultiProject(projectDir,project);
+  return project;
+}
 app=http.createServer(async(req,res)=>{
   try{
     if(![`127.0.0.1:${port}`,`localhost:${port}`].includes(req.headers.host)||req.headers['sec-fetch-site']==='cross-site')return json(res,{error:'Host refused'},403);
@@ -172,6 +273,91 @@ app=http.createServer(async(req,res)=>{
       return json(res,await routeUpload(await body(req),url.searchParams.get('name')||''));
     }
     // END MULTISOLID ADDITIVE API
+    if(route==='/api/single-step/start'&&req.method==='POST'){
+      const bytes=await body(req);
+      const rawName=path.basename(url.searchParams.get('name')||'');
+      if(!/^[\w.\-\u4e00-\u9fff ]{1,150}$/.test(rawName)||!/\.st(?:ep|p)$/i.test(rawName))throw Error('请上传有效的 .step 或 .stp 文件');
+      const tmpDir=path.join(RUNTIME,'single-step-uploads');fs.mkdirSync(tmpDir,{recursive:true});
+      const tmpStep=path.join(tmpDir,crypto.randomUUID()+'.step');
+      const tmpIr=tmpStep+'.ir.jsonl';
+      fs.writeFileSync(tmpStep,bytes);
+      try{
+        const stepirScript=path.join(SKILL,'scripts','stepir.py');
+        const r=spawnSync(PYTHON,[stepirScript,tmpStep,'--out',tmpIr],{encoding:'utf8',windowsHide:true,timeout:60000});
+        if(r.status!==0)throw Error('STEP 解析失败: '+(r.stderr||r.stdout||'exit '+r.status).slice(0,500));
+        const firstLine=fs.readFileSync(tmpIr,'utf8').split(/\r?\n/,1)[0];
+        const header=JSON.parse(firstLine||'{}');
+        if(header.solids!==1)throw Error(`仅支持单实体 STEP（当前 solids=${header.solids??'未知'}）`);
+        const s=await startSingleStepSession('STEP 重建 · '+rawName,tmpStep,tmpIr);
+        return json(res,{ok:true,session_id:s.id,title:s.title,solid_count:1,filename:rawName,input_step:'input/target.step',input_ir:'input/target.ir.jsonl'});
+      }finally{
+        fs.rmSync(tmpStep,{force:true});fs.rmSync(tmpIr,{force:true});
+      }
+    }
+    if(route==='/api/multisolid-local/import'&&req.method==='POST'){
+      const bytes=await body(req);
+      const rawName=path.basename(url.searchParams.get('name')||'');
+      if(!/^[\w.\-\u4e00-\u9fff ]{1,150}$/.test(rawName)||!/\.st(?:ep|p)$/i.test(rawName))throw Error('请上传有效的 .step 或 .stp 文件');
+      const projectId='ms_'+crypto.randomBytes(6).toString('hex');
+      const projectDir=multiProjectDir(projectId);fs.mkdirSync(projectDir,{recursive:true});
+      const sourceStep=path.join(projectDir,'source.step');fs.writeFileSync(sourceStep,bytes);
+      const splitScript=path.join(ROOT,'tools','multisolid_split_merge.py');
+      const stepirScript=path.join(SKILL,'scripts','stepir.py');
+      const r=spawnSync(PYTHON,[splitScript,'split',sourceStep,projectDir,'--stepir',stepirScript],{encoding:'utf8',windowsHide:true,timeout:180000});
+      if(r.status!==0){
+        let errMsg=(r.stderr||r.stdout||'STEP 拆分失败').trim();
+        try{const parsed=JSON.parse(r.stdout||'{}');if(parsed.error)errMsg=parsed.error;}catch{}
+        fs.rmSync(projectDir,{recursive:true,force:true});
+        throw Error(errMsg.slice(0,500));
+      }
+      const splitData=JSON.parse(r.stdout.trim().split(/\r?\n/).pop()||'{}');
+      const project={project_id:projectId,filename:rawName,created_at:new Date().toISOString(),solid_count:splitData.solid_count,merged_step:null,merge_info:null,parts:splitData.parts};
+      saveMultiProject(projectDir,project);
+      return json(res,{ok:true,project});
+    }
+    if(route==='/api/multisolid-local/projects'&&req.method==='GET'){
+      const root=path.join(WORKSPACE,'multisolid-projects');
+      if(!fs.existsSync(root))return json(res,{projects:[]});
+      const list=[];
+      for(const d of fs.readdirSync(root,{withFileTypes:true})){
+        if(!d.isDirectory()||!/^ms_[a-f0-9]+$/.test(d.name))continue;
+        const pFile=path.join(root,d.name,'project.json');
+        if(fs.existsSync(pFile))try{list.push(JSON.parse(fs.readFileSync(pFile,'utf8')));}catch{}
+      }
+      list.sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+      return json(res,{projects:list});
+    }
+    const msMatch=route.match(/^\/api\/multisolid-local\/projects\/(ms_[a-f0-9]+)(?:\/(.*))?$/);
+    if(msMatch){
+      const [,projectId,subAction]=msMatch,projectDir=multiProjectDir(projectId);
+      let project=readMultiProject(projectDir);
+      if(!subAction&&req.method==='GET'){
+        project=await syncMultiProject(projectDir,project,true);
+        return json(res,{ok:true,project});
+      }
+      const partGenMatch=subAction?.match(/^parts\/(part_\d+)\/generate$/);
+      if(partGenMatch&&req.method==='POST'){
+        const part=project.parts.find(p=>p.id===partGenMatch[1]);
+        if(!part)return json(res,{error:'未找到该单实体'},404);
+        const s=await startSingleStepSession(`${project.filename} · ${part.label}`,path.join(projectDir,part.target_step),path.join(projectDir,part.target_ir));
+        part.session_id=s.id;part.status='running';part.generated_step=null;
+        project.merged_step=null;project.merge_info=null;
+        saveMultiProject(projectDir,project);
+        return json(res,{ok:true,part,session_id:s.id,project});
+      }
+      if(subAction==='merge'&&req.method==='POST'){
+        project=await syncMultiProject(projectDir,project,false);
+        project=mergeMultiProject(projectDir,project);
+        return json(res,{ok:true,project});
+      }
+      if(subAction==='download'&&req.method==='GET'){
+        if(!project.merged_step)throw Error('尚未生成合并后的 STEP');
+        const mergedPath=inside(projectDir,project.merged_step);
+        const dlName=path.basename(project.filename,path.extname(project.filename))+'_merged.step';
+        res.writeHead(200,{'content-type':'application/step','content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(dlName)}`,'cache-control':'no-store'});
+        return fs.createReadStream(mergedPath).pipe(res);
+      }
+    }
     if(route==='/api/provider/models'){
       if(req.method!=='POST')return json(res,{error:'Method not allowed'},405);
       if(req.headers['x-cad-config-token']!==configToken)return json(res,{error:'Configuration token required'},403);
